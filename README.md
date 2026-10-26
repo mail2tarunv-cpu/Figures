@@ -1,81 +1,54 @@
-# FIGURES — camera experiment 001
+# FIGURES — Living Pixels
 
-A working browser MVP for the original idea: **turn people into solid-color silhouettes while preserving the photographic scene**. The application is intentionally built around one filter, with a small clean engine that can support more experiments later.
+A camera experiment that turns people into **floating confidence-driven pixel figures**, keeping the surrounding photo untouched. Designed for mobile Safari as a zero-account client-side web app.
 
-## What it can do
+## Implemented
 
-- Live camera feed (starts on rear camera when available)
-- Real-time person vs. background segmentation with temporal edge stabilization and isolated-pixel cleanup
-- Solid-color silhouettes with 5 different presets
-- Upload and process an existing photo
-- Press-and-hold comparison with the original
-- Flip front/rear camera
-- Tap shutter once to freeze and refine at higher resolution, then tap again to share/save a PNG rendered from the original photo
-- Runs inference on-device. No custom server, account, or photo upload endpoint.
+- **P0 · Confidence density:** Sample MediaPipe's *raw* per-pixel person probabilities (before alpha thresholding). Dense bright pixels occupy high-confidence body regions; ambiguous edges become scattered and translucent instead of making a hard incorrect cutout.
+- **P0 · Independent animation:** 2D Canvas renders continuously (target ~30 fps) even when segmentation runs more slowly (~5–14 analyses/s depending on phone). Slowly moving color waves and subpixel drifts have a stable time clock.
+- **P1 · Motion Echo:** Store sparse historical figure-grid samples only when the segmented person's center moves. Echo particles float up and right and fade in under one second; capped history avoids unlimited memory growth. Reduced Motion disables floating/trails.
+- **P1 · Record:** A secondary **Record 8s** control records the composited canvas silently with `captureStream()` + `MediaRecorder` on supporting browsers. Tap to stop early or stop automatically at eight seconds, review the clip, and save/share MP4 or WebM depending on browser. If the device doesn't support these APIs, photo capture remains available. Recording is local; browser recording format/quality may vary. iOS Safari testing is still required.
+- **P2 · Lightweight figure association:** Connected components in the segmentation confidence grid are matched across successive analyses by motion-predicted centroid and size. Identity IDs drive visual phase continuity and trigger trails. **This is not a true individual-person detector**: close, overlapping or occluded people merge and IDs may reset. Improving that requires a true instance segmentation/tracking model.
+- Clean front/rear camera UI, five palettes, hold-to-compare, uploaded-photo refinement, photo PNG sharing/saving.
+- Original camera imagery remains on device. MediaPipe JS/WASM and the selfie segmentation model download from their public CDNs on first use.
 
-**Important:** This version uses *binary person segmentation*. It paints *all people the same color*. Per-person colors, tracking, video capture, and halftone mode are intentionally out of scope. The model is optimized for selfie/person segmentation and may struggle with very distant pedestrians, overlapping figures, hair wisps, or motion blur. The current Google model has a **256 × 256 native input**: higher-resolution camera frames and edge-aware polishing cannot create boundary details the model did not identify. Apple Vision accurate-quality native iOS person segmentation is a future option if more accuracy is required.
-
-## Run locally
-
-1. Unzip the project and open Terminal inside the `figures-camera` directory.
-2. Start a local HTTP server:
-
-   ```bash
-   python3 -m http.server 8000
-   ```
-
-3. Open `http://localhost:8000` in Chrome, Safari, or another modern browser.
-4. Select **Open camera** and grant permission, or upload a photograph.
-
-For mobile phones, deploy the three web files (`index.html`, `styles.css`, `app.js`, `person-mask.mjs`) to **an HTTPS website**, e.g., Vercel/Netlify. Merely opening your laptop's `http://192.168...` URL on a phone will not grant camera access because it is not a secure context. Browsers require HTTPS or localhost for camera permission.
-
-## Dependencies
-
-- `@mediapipe/tasks-vision@1.1.1` — browser JS/WASM loaded from jsDelivr
-- Google `selfie_segmenter` float16 model — loaded from Google Cloud Storage
-
-Internet access is required to load the library and model, especially on first use. The app does not include any tracking analytics code; MediaPipe may send technical usage metrics according to Google's package privacy notice. Image processing happens locally in the browser.
-
-## File map
-
-- `index.html` — app UI and interaction controls
-- `styles.css` — responsive camera-first visual design
-- `app.js` — camera, segmentation, canvas compositor, save/share
-- `person-mask.mjs` — handles single/multi-channel MediaPipe masks and category fallback
-- `mask-refinement.mjs` — adaptive live temporal stabilization, speck cleanup, crisp alpha, color-guided photo refinement
-- `tests/mask-refinement.test.mjs` — isolated-pixel, edge, temporal and dimension regression tests
-- `tests/person-mask.test.mjs` — regression coverage for mask output shapes
-
-## What to test on an actual device
-
-- Rear camera resolution/orientation on an iPhone
-- How closely the masks follow walking people; notably feet and hair
-- Mask jitter while walking with the camera
-- Low-light performance
-- Safari's share sheet vs. Chrome PNG download
-
-## Future filter architecture
-
-`applySegmentation()` receives the person confidence mask; `paintMask()` is the renderer. Other filters (halftone, negative-space, multiple colors) can be implemented in new renderers without rebuilding the camera/photo pipeline. Distinct colors for each person would require a separate instance-segmentation or person-tracking pipeline.
-
-## Run checks
+## Start
 
 ```bash
-node --test
+python3 -m http.server 8000
+```
+
+Open http://localhost:8000 on a laptop or deploy the site to **HTTPS** for mobile camera permission. Tap **Open camera**, then either tap the white shutter to capture a still (tap again to save) or **Record 8s** to make a silent clip. Tap the red recording control to stop early; the recording preview presents **Save video**. Some browsers only offer download rather than the native share sheet.
+
+## Architecture
+
+- `app.js` — controls, MediaPipe selfie segmenter, adaptive inference, animation, recording, save/share
+- `living-pixels.mjs` — pure confidence sampling, opacity, connected components, lightweight centroid association, sparse echo points
+- `person-mask.mjs` — normalizes MediaPipe foreground outputs, single/dual channel plus category fallback
+- `mask-refinement.mjs` — temporal smoothing, isolated-noise removal, guided photo edge refinement
+- `styles.css`, `index.html` — camera-first UI
+- `tests/*.test.mjs` — Node regression tests
+
+```bash
+node --test tests/*.test.mjs
 node --check app.js
 ```
 
-The Safari bug fixed in October 2026: the selfie model can return a *single*
-foreground confidence mask. Previously the app always indexed `confidenceMasks[1]`
-and displayed “Person mask unavailable” for valid output. We now support single-
-and dual-channel masks, plus category-mask fallback. Real-device testing is still
-required for camera smoothness and subject selection.
+## Known limits
 
-## Shutter behavior (high-quality mode)
+1. The MediaPipe selfie segmenter's native input is ~256×256. Enlarging the camera frame cannot generate missing hair, shoe or distant-person boundaries. Pixels are intentionally expressive rather than a perfect Photoshop cutout.
+2. A single foreground mask cannot separate overlapping people. Our component tracker only associates already-separated regions.
+3. Canvas + MediaRecorder support, codecs, FPS, battery and thermal throttling vary across iPhones. Confirm on-device before claiming production quality; test MP4/WebM output on the target iOS version.
+4. Video recording is silent, capped to eight seconds, and stops if Safari goes into the background.
 
-1. The live camera shows an on-device segmentation preview with a narrow matte edge. Inference cadence adapts to phone speed to avoid excessive stalls.
-2. The first shutter press freezes a clean, full camera frame and reruns the segmenter in **IMAGE** mode on a larger frame. Edge processing uses original photo pixels where they are available.
-3. The shutter changes to a down-arrow. Tap it again to share/save a PNG drawn from the source photo with exactly the crop visible in the viewfinder.
-4. **Back to camera** resumes live capture. The library upload path also gets the still-photo refinement pass.
+## P3 · LiDAR / native spatial pixels — not part of the web build
 
-Refinement does not guarantee Photoshop-perfect selections, especially for distant groups. Fine hair needs a stronger segmentation/matting model, or a native iOS implementation.
+Browser Safari has no standard API to access live iPhone LiDAR scene-depth buffers. A real depth-aware version would require a native iOS app. Proposed pipeline:
+
+- Swift + ARKit `ARWorldTrackingConfiguration`, device capability checks for `.sceneDepth` / `.smoothedSceneDepth`
+- ARKit `personSegmentationWithDepth` where supported, or Vision/Core ML person segmentation
+- Register depth and RGB images; reject invalid/far depth samples, estimate per-tile world-space positions
+- Metal instanced particles with depth-based parallax, occlusion, motion trails and camera motion compensation
+- Fallback to current 2D treatment when LiDAR or person-segmentation-with-depth isn't supported
+
+LiDAR *does not replace* high-quality person segmentation, and only supported iPhone Pro/iPad Pro devices have the sensor. Validate on devices before choosing native migration.
