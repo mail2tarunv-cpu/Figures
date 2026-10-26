@@ -39,6 +39,7 @@ const elements = {
   flip: document.querySelector('#flipButton'),
   compare: document.querySelector('#compareButton'),
   backToCamera: document.querySelector('#backToCameraButton'),
+  backdropToggle: document.querySelector('#backdropToggle'),
   record: document.querySelector('#recordButton'),
   recordClock: document.querySelector('#recordClock'),
   previewModal: document.querySelector('#videoPreviewModal'),
@@ -67,6 +68,7 @@ const state = {
   mode: 'idle',                    // idle | camera | photo
   facing: 'environment',
   color: '#F5FC66',
+  blackBackground: false,
   stream: null,
   photo: null,
   mediaWidth: 0,
@@ -143,6 +145,12 @@ function refreshControls() {
   elements.backToCamera.disabled = state.mode !== 'photo' || state.busy;
   elements.compare.hidden = !active || !state.hasMask;
   elements.backToCamera.hidden = state.mode !== 'photo';
+  // The toggle remains usable during a recording so the change is captured.
+  elements.backdropToggle.hidden = !active;
+  elements.backdropToggle.disabled = !active || state.busy;
+  elements.backdropToggle.setAttribute('aria-pressed', String(state.blackBackground));
+  elements.backdropToggle.classList.toggle('is-active', state.blackBackground);
+  elements.backdropToggle.title = state.blackBackground ? 'Show original background' : 'Make the background black';
   for (const button of elements.colorButtons) {
     const selected = button.dataset.color === state.color;
     button.classList.toggle('selected', selected);
@@ -208,7 +216,15 @@ function drawFrame(targetCanvas = elements.canvas, targetContext = ctx) {
   }
   targetContext.imageSmoothingEnabled = true;
   targetContext.imageSmoothingQuality = 'high';
-  targetContext.drawImage(source, x, y, width, height, 0, 0, w, h);
+  // Show the original viewfinder until a person is detected, so users can
+  // still frame their shot. Holding Compare always reveals the raw scene.
+  // This single compositor path feeds live preview, PNGs, and video recording.
+  if (state.blackBackground && state.hasMask && !state.comparing) {
+    targetContext.fillStyle = '#000000';
+    targetContext.fillRect(0, 0, w, h);
+  } else {
+    targetContext.drawImage(source, x, y, width, height, 0, 0, w, h);
+  }
 
   if (state.hasMask && !state.comparing) {
     const mx = x / state.mediaWidth * state.maskWidth;
@@ -765,6 +781,12 @@ function initEvents() {
   elements.shutter.addEventListener('click', () => {
     if (state.mode === 'camera') captureFrame();
     else if (state.mode === 'photo') saveFrame();
+  });
+  elements.backdropToggle.addEventListener('click', () => {
+    if (state.mode === 'idle' || state.busy) return;
+    state.blackBackground = !state.blackBackground;
+    refreshControls();
+    drawFrame();
   });
   elements.compare.addEventListener('pointerdown', event => {
     if (elements.compare.disabled) return;
