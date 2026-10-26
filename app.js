@@ -6,7 +6,8 @@
  */
 
 import { extractPersonMask } from './person-mask.mjs';
-import { refineConfidence, alphaFromConfidence } from './mask-refinement.mjs';
+import { refineConfidence } from './mask-refinement.mjs';
+import { buildConfidenceTiles, tileOpacity, tileHash, findFigures, trackFigures, makeEchoPoints } from './living-pixels.mjs';
 
 const MEDIAPIPE_VERSION = '1.1.1';
 const PACKAGE_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}`;
@@ -18,6 +19,9 @@ const MAX_LIVE_ANALYSIS_SIDE = 640;
 const MAX_CAPTURE_ANALYSIS_SIDE = 1400;
 const MAX_EXPORT_SIDE = 2400;
 const MIN_ANALYSIS_INTERVAL_MS = 70;
+const RECORD_DURATION_MS = 8000;
+const ECHO_LIFETIME_MS = 950;
+const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 const elements = {
   canvas: document.querySelector('#outputCanvas'),
@@ -35,6 +39,12 @@ const elements = {
   flip: document.querySelector('#flipButton'),
   compare: document.querySelector('#compareButton'),
   backToCamera: document.querySelector('#backToCameraButton'),
+  record: document.querySelector('#recordButton'),
+  recordClock: document.querySelector('#recordClock'),
+  previewModal: document.querySelector('#videoPreviewModal'),
+  previewVideo: document.querySelector('#clipPreview'),
+  saveClip: document.querySelector('#saveClipButton'),
+  closeClip: document.querySelector('#closeClipButton'),
   colorButtons: document.querySelectorAll('.swatch'),
   info: document.querySelector('#infoButton'),
   modal: document.querySelector('#aboutModal'),
@@ -44,12 +54,12 @@ const elements = {
 const ctx = elements.canvas.getContext('2d', { alpha: false });
 const analysisCanvas = document.createElement('canvas');
 const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
-const maskCanvas = document.createElement('canvas');
-const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+const guideCanvas = document.createElement('canvas');
+const guideCtx = guideCanvas.getContext('2d', { willReadFrequently: true });
 const overlayCanvas = document.createElement('canvas');
 const overlayCtx = overlayCanvas.getContext('2d', { alpha: true });
-const occupancyCanvas = document.createElement('canvas');
-const occupancyCtx = occupancyCanvas.getContext('2d', { willReadFrequently: true });
+// Occupancy is computed from the unclipped probabilities, not the binary mask.
+const recording = { recorder: null, stream: null, chunks: [], timeout: null, startedAt: 0, blob: null, url: null, canceled: false };
 let maskRevision = 0;
 let occupancyCache = null;
 
@@ -79,6 +89,11 @@ const state = {
   lastTimestamp: 0,
   session: 0,
   frozenEffectTime: 0,
+  lastRenderAt: 0,
+  tracks: [],
+  nextTrackId: 1,
+  echoes: [],
+  lastEchoAt: 0,
 };
 
 let toastTimeout = null;
@@ -111,12 +126,19 @@ function hideEmpty() {
 function refreshControls() {
   const active = state.mode !== 'idle';
   elements.live.hidden = state.mode !== 'camera';
-  elements.flip.disabled = state.mode !== 'camera' || state.busy;
-  elements.shutter.disabled = !active || state.busy || (state.mode === 'photo' && !state.hasMask);
+  const isRecording = recording.recorder?.state === 'recording';
+  elements.flip.disabled = state.mode !== 'camera' || state.busy || isRecording;
+  elements.upload.disabled = state.busy || isRecording;
+  elements.record.hidden = state.mode !== 'camera';
+  elements.record.disabled = state.mode !== 'camera' || state.busy || (!isRecording && !supportsVideoRecording());
+  elements.record.classList.toggle('is-recording', isRecording);
+  elements.record.setAttribute('aria-pressed', String(isRecording));
+  elements.record.setAttribute('aria-label', isRecording ? 'Stop video recording' : 'Record an 8-second clip');
+  elements.shutter.disabled = !active || state.busy || isRecording || (state.mode === 'photo' && !state.hasMask);
   elements.shutter.setAttribute('aria-label', state.mode === 'camera' ? 'Take photo and refine edges' : 'Save edited photo');
   elements.shutter.classList.toggle('save-mode', state.mode === 'photo');
   const sceneTip = elements.viewBottom.querySelector('.scene-tip');
-  if (sceneTip) sceneTip.textContent = state.mode === 'photo' ? 'TAP ↓ TO SAVE' : 'PIXEL FLOW';
+  if (sceneTip) sceneTip.textContent = state.mode === 'photo' ? 'TAP ↓ TO SAVE' : (isRecording ? 'RECORDING · 8 SEC MAX' : 'LIVING PIXELS');
   elements.compare.disabled = !active || !state.hasMask || state.busy;
   elements.backToCamera.disabled = state.mode !== 'photo' || state.busy;
   elements.compare.hidden = !active || !state.hasMask;
@@ -129,6 +151,7 @@ function refreshControls() {
 }
 
 function stopVideo() {
+  if (recording.recorder?.state === 'recording') stopRecording(true);
   if (state.animationHandle != null) cancelAnimationFrame(state.animationHandle);
   state.animationHandle = null;
   if (state.stream) {
@@ -153,7 +176,8 @@ function clearMask() {
   state.frozenEffectTime = 0;
   maskRevision++;
   occupancyCache = null;
-  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+  state.tracks = []; state.nextTrackId = 1;
+  state.echoes = []; state.lastEchoAt = 0;
   refreshControls();
 }
 
@@ -219,92 +243,90 @@ function buildPixelPalette() {
 // Crucially, the grid *itself* defines the silhouette edge, rather than drawing
 // a sharp pixel pattern under the same visibly inaccurate smooth outline.
 function getPixelOccupancy(width, height, crop) {
-  const cell = Math.max(12, Math.round(Math.min(width, height) / 37));
-  const cols = Math.ceil(width / cell);
-  const rows = Math.ceil(height / cell);
+  const cell = Math.max(12, Math.round(Math.min(width, height) / 38));
+  const cols = Math.ceil(width / cell), rows = Math.ceil(height / cell);
   const key = `${maskRevision}:${width}:${height}:${cell}:${crop.mx.toFixed(3)}:${crop.my.toFixed(3)}:${crop.mw.toFixed(3)}:${crop.mh.toFixed(3)}`;
   if (occupancyCache?.key === key) return occupancyCache;
-
-  occupancyCanvas.width = cols;
-  occupancyCanvas.height = rows;
-  occupancyCtx.clearRect(0, 0, cols, rows);
-  // Browser resampling here effectively averages each mask tile's coverage.
-  occupancyCtx.drawImage(maskCanvas, crop.mx, crop.my, crop.mw, crop.mh, 0, 0, cols, rows);
-  const rgba = occupancyCtx.getImageData(0, 0, cols, rows).data;
-  const coverage = new Uint8Array(cols * rows);
-  for (let i = 0; i < coverage.length; i++) coverage[i] = rgba[i * 4 + 3];
-  occupancyCache = { key, coverage, cols, rows, cell };
+  const previous = occupancyCache;
+  const field = buildConfidenceTiles(state.confidence, state.maskWidth, state.maskHeight, cols, rows, crop);
+  const components = findFigures(field, cols, rows, .46, 5);
+  const now = performance.now();
+  const tracked = trackFigures(state.mode === 'camera' ? state.tracks : [], components, state.nextTrackId, now);
+  const identities = new Int32Array(cols * rows);
+  for (const [index, id] of tracked.idsByCell) identities[index] = id;
+  if (state.mode === 'camera') {
+    // Capture only actual movement, not an echo of an unmoving figure.
+    if (previous && previous.width === width && previous.height === height &&
+        tracked.movement > .008 && now - state.lastEchoAt > 135 && !(reducedMotion?.matches)) {
+      const points = makeEchoPoints(previous.field, previous.cols, previous.rows, 125);
+      if (points.length) state.echoes.push({ points, capturedAt: now, cell: previous.cell });
+      state.echoes = state.echoes.slice(-7);
+      state.lastEchoAt = now;
+    }
+    state.tracks = tracked.tracks;
+    state.nextTrackId = tracked.nextId;
+  }
+  occupancyCache = { key, field, cols, rows, cell, identities, width, height };
   return occupancyCache;
 }
 
-// Subtle continuous directional color waves and breathing movement of each
-// square make the field feel spatial and alive without a frantic glitch effect.
 function renderPixelOverlay(width, height, crop, timeMs) {
   if (overlayCanvas.width !== width) overlayCanvas.width = width;
   if (overlayCanvas.height !== height) overlayCanvas.height = height;
   overlayCtx.clearRect(0, 0, width, height);
-  const { coverage, cols, rows, cell } = getPixelOccupancy(width, height, crop);
+  const { field, cols, rows, cell, identities } = getPixelOccupancy(width, height, crop);
   const { light, base, shadow } = buildPixelPalette();
-  const colors = [
-    `rgb(${light.join(',')})`,
-    `rgb(${base.join(',')})`,
-    `rgb(${shadow.join(',')})`,
-  ];
-  const t = timeMs * 0.001;
-  const gap = Math.max(1, Math.round(cell * 0.1));
-  const size = cell - gap;
-  let previousStyle = '';
-
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      const i = row * cols + col;
-      const amount = coverage[i] / 255;
-      // Strong inner pixels remain consistently filled; ambiguous boundary
-      // pixels become sparse squares rather than smeared AI-cutout borders.
-      const hash = ((col * 73 + row * 139 + col * row * 17) % 101) / 101;
-      if (amount < (amount > 0.72 ? 0.16 : 0.28 + hash * 0.23)) continue;
-      const flow = Math.sin(col * 0.38 + row * 0.26 - t * 1.35 + hash * 0.7);
-      const shimmer = Math.cos(col * 0.31 - row * 0.19 + t * 0.55);
-      const tone = flow + 0.25 * shimmer > 0.67 ? 0 : flow < -0.65 ? 2 : 1;
-      if (colors[tone] !== previousStyle) {
-        previousStyle = colors[tone];
-        overlayCtx.fillStyle = previousStyle;
+  const colors = [light, base, shadow].map(rgb => `rgb(${rgb.join(',')})`);
+  const motionless = Boolean(reducedMotion?.matches);
+  const seconds = (motionless ? 0 : timeMs) * .001;
+  const now = performance.now();
+  // Independent of model inference cadence: an echo remains behind and fades.
+  if (state.mode === 'camera' && !motionless) {
+    state.echoes = state.echoes.filter(e => now - e.capturedAt < ECHO_LIFETIME_MS);
+    overlayCtx.fillStyle = colors[0];
+    for (const echo of state.echoes) {
+      const age = (now - echo.capturedAt) / ECHO_LIFETIME_MS;
+      const alpha = (1 - age) ** 1.6 * .27;
+      const step = Math.max(3, echo.cell * (.34 + age * .10));
+      overlayCtx.globalAlpha = alpha;
+      for (const p of echo.points) {
+        const x = p.x * width + age * cell * 1.5;
+        const y = p.y * height - age * cell * 1.2;
+        overlayCtx.fillRect(Math.round(x), Math.round(y), step, step);
       }
-      const xDrift = Math.sin(t * 0.85 + row * 0.33 + hash * 5.1) * cell * 0.11;
-      const yDrift = Math.cos(t * 0.68 + col * 0.41 + hash * 4.2) * cell * 0.13;
-      // Intentionally omit squares at some edges to create a floating breakup.
-      const edge = amount < 0.7;
-      const pixelSize = edge ? Math.round(size * 0.77) : size;
-      const center = (cell - pixelSize) / 2;
-      overlayCtx.globalAlpha = edge ? Math.min(0.92, 0.54 + amount * 0.6) : 0.96;
-      overlayCtx.fillRect(
-        Math.round(col * cell + center + xDrift),
-        Math.round(row * cell + center + yDrift),
-        pixelSize, pixelSize
-      );
     }
+  }
+  let prevColor = '';
+  const gap = Math.max(1, Math.round(cell * .09));
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const i = y * cols + x, c = field[i];
+    const hash = tileHash(x, y);
+    const opacity = tileOpacity(c, hash);
+    if (!opacity) continue;
+    const id = identities[i];
+    // Stable, slowly travelling tone bands. Figure IDs keep the pattern phase
+    // associated with a moving separated figure rather than the camera frame.
+    const phase = x * .31 + y * .21 + id * .2 - seconds * 1.45 + hash * .6;
+    const wave = Math.sin(phase) + .24 * Math.cos(y * .41 - seconds * .58);
+    const tone = wave > .56 ? 0 : wave < -.66 ? 2 : 1;
+    if (prevColor !== colors[tone]) { overlayCtx.fillStyle = colors[tone]; prevColor = colors[tone]; }
+    const edge = c < .72;
+    const pixelSize = Math.max(3, Math.round((cell - gap) * (edge ? .56 + .24 * c : .96)));
+    const floating = motionless ? 0 : 1;
+    const xDrift = floating * (Math.sin(seconds * .78 + y * .29 + hash * 6) * cell * .14 + seconds % 2 * cell * .015);
+    const yDrift = floating * Math.cos(seconds * .62 + x * .35 + hash * 4) * cell * .15;
+    const inset = (cell - pixelSize) / 2;
+    overlayCtx.globalAlpha = opacity;
+    overlayCtx.fillRect(Math.round(x * cell + inset + xDrift), Math.round(y * cell + inset + yDrift), pixelSize, pixelSize);
   }
   overlayCtx.globalAlpha = 1;
 }
 
 function paintMask() {
   if (!state.confidence || !state.maskWidth || !state.maskHeight) return;
-  const width = state.maskWidth, height = state.maskHeight;
-  if (maskCanvas.width !== width) maskCanvas.width = width;
-  if (maskCanvas.height !== height) maskCanvas.height = height;
-  const image = maskCtx.createImageData(width, height);
-  const data = image.data;
-  for (let i = 0; i < state.confidence.length; i++) {
-    const value = state.confidence[i];
-    const p = i * 4;
-    data[p] = 255;
-    data[p + 1] = 255;
-    data[p + 2] = 255;
-    data[p + 3] = alphaFromConfidence(value, state.maskQuality);
-  }
-  maskCtx.putImageData(image, 0, 0);
+  // No texture upload per inference: the particle renderer samples the raw
+  // confidence field directly and runs independently in requestAnimationFrame.
   maskRevision++;
-  occupancyCache = null;
   state.hasMask = true;
   refreshControls();
   drawFrame();
@@ -324,9 +346,14 @@ function applySegmentation(result, quality = 'live') {
   const aligned = state.maskWidth === mask.width && state.maskHeight === mask.height;
   const previous = aligned ? state.previousConfidence : null;
   let guide = null;
-  if (quality === 'capture' && analysisCanvas.width === mask.width && analysisCanvas.height === mask.height) {
-    try { guide = analysisCtx.getImageData(0, 0, mask.width, mask.height).data; }
-    catch (error) { console.warn('Photo edge guide unavailable:', error); }
+  if (quality === 'capture') {
+    try {
+      // The model produces a smaller mask than the photo: align the RGB guide to
+      // the MASK, otherwise the matting step would never actually run.
+      guideCanvas.width = mask.width; guideCanvas.height = mask.height;
+      guideCtx.drawImage(analysisCanvas, 0, 0, mask.width, mask.height);
+      guide = guideCtx.getImageData(0, 0, mask.width, mask.height).data;
+    } catch (error) { console.warn('Photo edge guide unavailable:', error); }
   }
   const refined = refineConfidence(mask.confidence, mask.width, mask.height, { previous, guide, quality });
   let detectedPixels = 0;
@@ -389,7 +416,9 @@ function analyzeSource(source, sourceWidth, sourceHeight, quality = 'live') {
 function tick(now) {
   if (state.mode !== 'camera') return;
   if (elements.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-    drawFrame();
+    // Renderer remains smooth between relatively expensive AI segmentations.
+    if (now - state.lastRenderAt >= 32) { drawFrame(); state.lastRenderAt = now; }
+    if (recording.recorder?.state === 'recording') updateRecordingClock(now);
     if (state.model && state.modelMode === 'VIDEO' && !document.hidden &&
       (now - state.lastInferAt) >= state.analysisIntervalMs &&
       elements.video.currentTime !== state.lastVideoTime) {
@@ -447,7 +476,7 @@ async function startCamera() {
     if (!state.mediaWidth || !state.mediaHeight) throw new Error('No camera frames received');
     state.mode = 'camera';
     hideEmpty();
-    state.lastInferAt = 0;
+    state.lastInferAt = 0; state.lastRenderAt = 0;
     state.analysisIntervalMs = 88;
     state.lastVideoTime = -1;
     state.lastTimestamp = 0;
@@ -609,6 +638,110 @@ async function saveFrame() {
   }
 }
 
+function supportsVideoRecording() {
+  return typeof MediaRecorder !== 'undefined' && typeof elements.canvas.captureStream === 'function';
+}
+
+function preferredVideoMime() {
+  if (!supportsVideoRecording()) return null;
+  const types = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  return types.find(type => MediaRecorder.isTypeSupported(type)) || '';
+}
+
+function updateRecordingClock(now = performance.now()) {
+  if (recording.recorder?.state !== 'recording') return;
+  const elapsed = Math.min(RECORD_DURATION_MS, now - recording.startedAt);
+  const secs = Math.ceil((RECORD_DURATION_MS - elapsed) / 1000);
+  elements.recordClock.textContent = `${secs}s left`;
+  if (elapsed >= RECORD_DURATION_MS) stopRecording();
+}
+
+function startRecording() {
+  if (state.mode !== 'camera' || state.busy || recording.recorder?.state === 'recording') return;
+  if (!supportsVideoRecording()) { notify('This browser cannot record canvas video. Try Safari or Chrome.'); return; }
+  try {
+    closeVideoPreview();
+    const stream = elements.canvas.captureStream(30);
+    if (!stream.getVideoTracks().length) throw new Error('Canvas video track unavailable');
+    const mimeType = preferredVideoMime();
+    const recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 2_400_000 });
+    recording.recorder = recorder;
+    recording.stream = stream;
+    recording.canceled = false;
+    recording.chunks = [];
+    recording.startedAt = performance.now();
+    recorder.ondataavailable = event => { if (event.data?.size) recording.chunks.push(event.data); };
+    recorder.onerror = event => { console.error('Video recorder error', event); notify('Recording failed on this browser.'); stopRecording(true); };
+    recorder.onstop = () => {
+      const cancelled = recording.canceled;
+      const chunks = [...recording.chunks];
+      const type = recorder.mimeType || mimeType || 'video/mp4';
+      recording.stream?.getTracks().forEach(track => track.stop());
+      recording.stream = null;
+      if (recording.timeout) clearTimeout(recording.timeout);
+      recording.timeout = null;
+      recording.recorder = null;
+      recording.chunks = [];
+      elements.recordClock.hidden = true;
+      refreshControls();
+      if (cancelled) return;
+      if (!chunks.length || chunks.every(blob => !blob.size)) {
+        notify('The browser recorded no frames. Try again.'); return;
+      }
+      recording.blob = new Blob(chunks, { type });
+      recording.url = URL.createObjectURL(recording.blob);
+      elements.previewVideo.src = recording.url;
+      elements.previewModal.hidden = false;
+    };
+    // Start in direct response to the user's tap (Safari user activation).
+    recorder.start(250);
+    recording.timeout = setTimeout(() => stopRecording(), RECORD_DURATION_MS);
+    elements.recordClock.hidden = false;
+    updateRecordingClock();
+    refreshControls();
+  } catch (error) {
+    console.error('Could not record the processed canvas', error);
+    recording.stream?.getTracks().forEach(track => track.stop());
+    recording.stream = null; recording.recorder = null;
+    notify('Video recording unavailable on this device. Photos still work.', 5000);
+    refreshControls();
+  }
+}
+
+function stopRecording(discard = false) {
+  if (recording.recorder?.state !== 'recording') return;
+  recording.canceled = discard;
+  try { recording.recorder.stop(); } catch (error) { console.warn('Stopping recorder failed', error); }
+  if (recording.timeout) clearTimeout(recording.timeout);
+  recording.timeout = null;
+  elements.recordClock.hidden = true;
+  refreshControls();
+}
+
+function closeVideoPreview() {
+  elements.previewModal.hidden = true;
+  elements.previewVideo.pause();
+  elements.previewVideo.removeAttribute('src');
+  elements.previewVideo.load();
+  if (recording.url) URL.revokeObjectURL(recording.url);
+  recording.url = null; recording.blob = null;
+}
+
+async function saveRecordedClip() {
+  const blob = recording.blob;
+  if (!blob) return;
+  const ext = blob.type.includes('webm') ? 'webm' : 'mp4';
+  const file = new File([blob], `FIGURES-${new Date().toISOString().replaceAll(':','-')}.${ext}`, { type: blob.type });
+  if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+    try { await navigator.share({ files: [file], title: 'FIGURES · Living Pixels' }); return; }
+    catch (error) { if (error?.name === 'AbortError') return; console.warn('File sharing unavailable, downloading', error); }
+  }
+  const link = document.createElement('a');
+  link.href = recording.url; link.download = file.name;
+  document.body.appendChild(link); link.click(); link.remove();
+  notify('Clip ready to save.');
+}
+
 function setComparing(isComparing) {
   state.comparing = isComparing;
   if (state.mode === 'photo') drawFrame();
@@ -625,6 +758,10 @@ function initEvents() {
     state.facing = state.facing === 'environment' ? 'user' : 'environment';
     startCamera();
   });
+  elements.record.addEventListener('click', () => recording.recorder?.state === 'recording' ? stopRecording() : startRecording());
+  elements.closeClip.addEventListener('click', closeVideoPreview);
+  elements.saveClip.addEventListener('click', saveRecordedClip);
+  elements.previewModal.addEventListener('click', event => { if (event.target === elements.previewModal) closeVideoPreview(); });
   elements.shutter.addEventListener('click', () => {
     if (state.mode === 'camera') captureFrame();
     else if (state.mode === 'photo') saveFrame();
@@ -656,7 +793,8 @@ function initEvents() {
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape') elements.modal.hidden = true;
   });
-  window.addEventListener('pagehide', stopVideo);
+  window.addEventListener('pagehide', () => { stopRecording(true); stopVideo(); closeVideoPreview(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopRecording(); });
   window.addEventListener('resize', syncCanvasResolution);
 }
 
