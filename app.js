@@ -6,13 +6,18 @@
  */
 
 import { extractPersonMask } from './person-mask.mjs';
+import { refineConfidence, alphaFromConfidence } from './mask-refinement.mjs';
 
 const MEDIAPIPE_VERSION = '1.1.1';
 const PACKAGE_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}`;
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
 const OUTPUT_HEIGHT = 1200;
-const MAX_ANALYSIS_SIDE = 512;
-const ANALYSIS_INTERVAL_MS = 95;
+// Camera inference is constrained by the 256px segmentation model itself.
+// A larger analysis frame still helps preserve sampling/color boundaries.
+const MAX_LIVE_ANALYSIS_SIDE = 640;
+const MAX_CAPTURE_ANALYSIS_SIDE = 1400;
+const MAX_EXPORT_SIDE = 2400;
+const MIN_ANALYSIS_INTERVAL_MS = 70;
 
 const elements = {
   canvas: document.querySelector('#outputCanvas'),
@@ -54,6 +59,8 @@ const state = {
   modelPromise: null,
   modelMode: null,
   confidence: null,
+  previousConfidence: null,
+  maskQuality: 'live',
   maskWidth: 0,
   maskHeight: 0,
   hasMask: false,
@@ -61,6 +68,7 @@ const state = {
   busy: false,
   animationHandle: null,
   lastInferAt: 0,
+  analysisIntervalMs: 88,
   lastVideoTime: -1,
   lastTimestamp: 0,
   session: 0,
@@ -97,8 +105,12 @@ function refreshControls() {
   const active = state.mode !== 'idle';
   elements.live.hidden = state.mode !== 'camera';
   elements.flip.disabled = state.mode !== 'camera' || state.busy;
-  elements.shutter.disabled = !active || !state.hasMask;
-  elements.compare.disabled = !active || !state.hasMask;
+  elements.shutter.disabled = !active || state.busy || (state.mode === 'photo' && !state.hasMask);
+  elements.shutter.setAttribute('aria-label', state.mode === 'camera' ? 'Take photo and refine edges' : 'Save edited photo');
+  elements.shutter.classList.toggle('save-mode', state.mode === 'photo');
+  const sceneTip = elements.viewBottom.querySelector('.scene-tip');
+  if (sceneTip) sceneTip.textContent = state.mode === 'photo' ? 'TAP ↓ TO SAVE' : 'SOLID COLOR';
+  elements.compare.disabled = !active || !state.hasMask || state.busy;
   elements.backToCamera.disabled = state.mode !== 'photo' || state.busy;
   elements.compare.hidden = !active || !state.hasMask;
   elements.backToCamera.hidden = state.mode !== 'photo';
@@ -127,6 +139,8 @@ function releasePhoto() {
 
 function clearMask() {
   state.confidence = null;
+  state.previousConfidence = null;
+  state.maskQuality = 'live';
   state.hasMask = false;
   state.maskWidth = state.maskHeight = 0;
   maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
@@ -145,22 +159,22 @@ function getCrop(srcW, srcH, dstW, dstH) {
   return { x: 0, y: (srcH - croppedHeight) / 2, width: srcW, height: croppedHeight };
 }
 
-function drawFrame() {
+function drawFrame(targetCanvas = elements.canvas, targetContext = ctx) {
   if (state.mode === 'idle') return;
   const source = state.mode === 'camera' ? elements.video : state.photo;
   if (!source || !state.mediaWidth || !state.mediaHeight) return;
 
-  const { width: w, height: h } = elements.canvas;
+  const { width: w, height: h } = targetCanvas;
   const { x, y, width, height } = getCrop(state.mediaWidth, state.mediaHeight, w, h);
-  ctx.clearRect(0, 0, w, h);
-  ctx.save();
+  targetContext.clearRect(0, 0, w, h);
+  targetContext.save();
   if (state.mode === 'camera' && state.facing === 'user') {
-    ctx.translate(w, 0);
-    ctx.scale(-1, 1);
+    targetContext.translate(w, 0);
+    targetContext.scale(-1, 1);
   }
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(source, x, y, width, height, 0, 0, w, h);
+  targetContext.imageSmoothingEnabled = true;
+  targetContext.imageSmoothingQuality = 'high';
+  targetContext.drawImage(source, x, y, width, height, 0, 0, w, h);
 
   if (state.hasMask && !state.comparing) {
     // The segmentation image covers the *whole source frame*, not just its crop.
@@ -169,9 +183,9 @@ function drawFrame() {
     const my = y / state.mediaHeight * state.maskHeight;
     const mw = width / state.mediaWidth * state.maskWidth;
     const mh = height / state.mediaHeight * state.maskHeight;
-    ctx.drawImage(maskCanvas, mx, my, mw, mh, 0, 0, w, h);
+    targetContext.drawImage(maskCanvas, mx, my, mw, mh, 0, 0, w, h);
   }
-  ctx.restore();
+  targetContext.restore();
 }
 
 function hexRgb(color) {
@@ -188,14 +202,12 @@ function paintMask() {
   const data = image.data;
   for (let i = 0; i < state.confidence.length; i++) {
     const value = state.confidence[i];
-    // A narrow, anti-aliased confidence ramp: almost solid, slightly softened edges.
-    const t = Math.max(0, Math.min(1, (value - 0.38) / 0.32));
-    const smooth = t * t * (3 - 2 * t);
+    // Crisp Photoshop-like matte: opaque interior, narrow anti-aliased edge.
     const p = i * 4;
     data[p] = r;
     data[p + 1] = g;
     data[p + 2] = b;
-    data[p + 3] = Math.round(smooth * 255);
+    data[p + 3] = alphaFromConfidence(value, state.maskQuality);
   }
   maskCtx.putImageData(image, 0, 0);
   state.hasMask = true;
@@ -203,7 +215,7 @@ function paintMask() {
   drawFrame();
 }
 
-function applySegmentation(result) {
+function applySegmentation(result, quality = 'live') {
   const mask = extractPersonMask(result);
   if (!mask) {
     // This means the model returned no usable mask, not that the scene lacks a person.
@@ -214,9 +226,26 @@ function applySegmentation(result) {
     });
     return;
   }
+  const aligned = state.maskWidth === mask.width && state.maskHeight === mask.height;
+  const previous = aligned ? state.previousConfidence : null;
+  let guide = null;
+  if (quality === 'capture' && analysisCanvas.width === mask.width && analysisCanvas.height === mask.height) {
+    try { guide = analysisCtx.getImageData(0, 0, mask.width, mask.height).data; }
+    catch (error) { console.warn('Photo edge guide unavailable:', error); }
+  }
+  const refined = refineConfidence(mask.confidence, mask.width, mask.height, { previous, guide, quality });
+  let detectedPixels = 0;
+  for (let i = 0; i < refined.length; i += 16) if (refined[i] > 0.61) detectedPixels++;
+  if (detectedPixels < 3) {
+    clearMask();
+    drawFrame();
+    return;
+  }
   state.maskWidth = mask.width;
   state.maskHeight = mask.height;
-  state.confidence = mask.confidence;
+  state.maskQuality = quality;
+  state.confidence = refined;
+  state.previousConfidence = quality === 'live' ? refined : null;
   paintMask();
 }
 
@@ -252,8 +281,9 @@ async function setModelMode(mode) {
   }
 }
 
-function analyzeSource(source, sourceWidth, sourceHeight) {
-  const factor = Math.min(1, MAX_ANALYSIS_SIDE / Math.max(sourceWidth, sourceHeight));
+function analyzeSource(source, sourceWidth, sourceHeight, quality = 'live') {
+  const maxSide = quality === 'capture' ? MAX_CAPTURE_ANALYSIS_SIDE : MAX_LIVE_ANALYSIS_SIDE;
+  const factor = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
   const w = Math.max(2, Math.round(sourceWidth * factor));
   const h = Math.max(2, Math.round(sourceHeight * factor));
   if (analysisCanvas.width !== w) analysisCanvas.width = w;
@@ -266,7 +296,7 @@ function tick(now) {
   if (elements.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
     drawFrame();
     if (state.model && state.modelMode === 'VIDEO' && !document.hidden &&
-      (now - state.lastInferAt) >= ANALYSIS_INTERVAL_MS &&
+      (now - state.lastInferAt) >= state.analysisIntervalMs &&
       elements.video.currentTime !== state.lastVideoTime) {
       state.lastInferAt = now;
       state.lastVideoTime = elements.video.currentTime;
@@ -275,7 +305,12 @@ function tick(now) {
         // segmentForVideo is synchronous. Throttling prevents redundant inference.
         const timestamp = Math.max(Math.floor(now), state.lastTimestamp + 1);
         state.lastTimestamp = timestamp;
-        state.model.segmentForVideo(analysisCanvas, timestamp, applySegmentation);
+        const inferenceStart = performance.now();
+        state.model.segmentForVideo(analysisCanvas, timestamp, result => applySegmentation(result, 'live'));
+        // Inference is synchronous on Safari. Back off on slower phones rather
+        // than permanently freezing the camera to chase an FPS number.
+        const cost = performance.now() - inferenceStart;
+        state.analysisIntervalMs = Math.min(200, Math.max(MIN_ANALYSIS_INTERVAL_MS, cost * 1.25));
       } catch (error) {
         console.error('Live segmentation error:', error);
         notify('Live segmentation stopped. Try reopening the camera.');
@@ -318,6 +353,7 @@ async function startCamera() {
     state.mode = 'camera';
     hideEmpty();
     state.lastInferAt = 0;
+    state.analysisIntervalMs = 88;
     state.lastVideoTime = -1;
     state.lastTimestamp = 0;
     state.animationHandle = requestAnimationFrame(tick);
@@ -371,9 +407,9 @@ async function loadPhoto(file) {
     hideEmpty();
     drawFrame();
     await setModelMode('IMAGE');
-    analyzeSource(photo, photo.width, photo.height);
-    state.model.segment(analysisCanvas, applySegmentation);
-    notify('Photo ready. Choose a color and save.');
+    analyzeSource(photo, photo.width, photo.height, 'capture');
+    state.model.segment(analysisCanvas, result => applySegmentation(result, 'capture'));
+    notify(state.hasMask ? 'Edges refined. Tap the shutter to save.' : 'No person detected in this photo.');
   } catch (error) {
     console.error('Cannot segment photo:', error);
     notify('Could not process the image. Check your connection or try JPG/PNG.', 6000);
@@ -394,19 +430,68 @@ function loadFallbackImage(file) {
   });
 }
 
-async function saveFrame() {
-  if (!state.hasMask) return;
-  const originallyComparing = state.comparing;
-  state.comparing = false;
-  drawFrame();
-  state.comparing = originallyComparing;
-  const blob = await new Promise(resolve => elements.canvas.toBlob(resolve, 'image/png'));
-  if (!blob) return notify('Could not save the image.');
-  const file = new File([blob], `FIGURES-${new Date().toISOString().replaceAll(':', '-')}.png`, { type: 'image/png' });
+// Freeze the original sensor frame, not the previously composited preview.
+// Capture performs a separate image-mode segmentation pass before a PNG exists.
+async function captureFrame() {
+  if (state.busy || state.mode !== 'camera') return;
+  const session = ++state.session;
+  state.busy = true;
+  refreshControls();
   try {
+    const snapshot = document.createElement('canvas');
+    snapshot.width = state.mediaWidth;
+    snapshot.height = state.mediaHeight;
+    snapshot.getContext('2d', { alpha: false }).drawImage(elements.video, 0, 0, snapshot.width, snapshot.height);
+    stopVideo();
+    releasePhoto();
+    state.mode = 'photo';
+    clearMask();
+    state.photo = snapshot;
+    drawFrame();
+    notify('Refining the silhouette…', 6000);
+    await setModelMode('IMAGE');
+    if (session !== state.session) return;
+    analyzeSource(snapshot, snapshot.width, snapshot.height, 'capture');
+    // Callback form avoids an extra full mask copy and works on iOS Safari.
+    state.model.segment(analysisCanvas, result => applySegmentation(result, 'capture'));
+    notify(state.hasMask ? 'Refined. Tap the shutter to save.' : 'No person detected. Try another angle.', 4000);
+  } catch (error) {
+    console.error('Capture refinement failed:', error);
+    notify('Could not refine this image. Return to camera and retry.', 5500);
+  } finally {
+    if (session === state.session) { state.busy = false; refreshControls(); }
+  }
+}
+
+async function saveFrame() {
+  if (!state.hasMask || state.busy || state.mode !== 'photo') return;
+  state.busy = true;
+  refreshControls();
+  try {
+    // Export from the original photo, not the low-res live preview canvas.
+    // Keep the same crop and color the user composed in the viewfinder.
+    const bounds = elements.canvas;
+    const crop = getCrop(state.mediaWidth, state.mediaHeight, bounds.width, bounds.height);
+    const scale = Math.min(1, MAX_EXPORT_SIDE / Math.max(crop.width, crop.height));
+    const width = Math.max(1, Math.round(crop.width * scale));
+    const height = Math.max(1, Math.round(crop.height * scale));
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = width;
+    exportCanvas.height = height;
+    const exportCtx = exportCanvas.getContext('2d', { alpha: false });
+    const wasComparing = state.comparing;
+    state.comparing = false;
+    try { drawFrame(exportCanvas, exportCtx); }
+    finally { state.comparing = wasComparing; }
+    const blob = await new Promise(resolve => exportCanvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('PNG encoder returned no image');
+    const file = new File([blob], `FIGURES-${new Date().toISOString().replaceAll(':', '-')}.png`, { type: 'image/png' });
     if (navigator.canShare?.({ files: [file] }) && navigator.share) {
-      await navigator.share({ files: [file], title: 'FIGURES' });
-      notify('Image shared.');
+      try {
+        await navigator.share({ files: [file], title: 'FIGURES' });
+      } catch (error) {
+        if (error?.name !== 'AbortError') throw error;
+      }
     } else {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -419,10 +504,11 @@ async function saveFrame() {
       notify('Image saved.');
     }
   } catch (error) {
-    if (error?.name !== 'AbortError') {
-      console.error('Saving failed:', error);
-      notify('Save failed. Try again.');
-    }
+    console.error('Saving failed:', error);
+    notify('Save failed. Please try again.');
+  } finally {
+    state.busy = false;
+    refreshControls();
   }
 }
 
@@ -442,7 +528,10 @@ function initEvents() {
     state.facing = state.facing === 'environment' ? 'user' : 'environment';
     startCamera();
   });
-  elements.shutter.addEventListener('click', saveFrame);
+  elements.shutter.addEventListener('click', () => {
+    if (state.mode === 'camera') captureFrame();
+    else if (state.mode === 'photo') saveFrame();
+  });
   elements.compare.addEventListener('pointerdown', event => {
     if (elements.compare.disabled) return;
     elements.compare.setPointerCapture(event.pointerId);
