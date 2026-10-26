@@ -46,6 +46,12 @@ const analysisCanvas = document.createElement('canvas');
 const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
 const maskCanvas = document.createElement('canvas');
 const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+const overlayCanvas = document.createElement('canvas');
+const overlayCtx = overlayCanvas.getContext('2d', { alpha: true });
+const occupancyCanvas = document.createElement('canvas');
+const occupancyCtx = occupancyCanvas.getContext('2d', { willReadFrequently: true });
+let maskRevision = 0;
+let occupancyCache = null;
 
 const state = {
   mode: 'idle',                    // idle | camera | photo
@@ -72,6 +78,7 @@ const state = {
   lastVideoTime: -1,
   lastTimestamp: 0,
   session: 0,
+  frozenEffectTime: 0,
 };
 
 let toastTimeout = null;
@@ -109,7 +116,7 @@ function refreshControls() {
   elements.shutter.setAttribute('aria-label', state.mode === 'camera' ? 'Take photo and refine edges' : 'Save edited photo');
   elements.shutter.classList.toggle('save-mode', state.mode === 'photo');
   const sceneTip = elements.viewBottom.querySelector('.scene-tip');
-  if (sceneTip) sceneTip.textContent = state.mode === 'photo' ? 'TAP ↓ TO SAVE' : 'SOLID COLOR';
+  if (sceneTip) sceneTip.textContent = state.mode === 'photo' ? 'TAP ↓ TO SAVE' : 'PIXEL FLOW';
   elements.compare.disabled = !active || !state.hasMask || state.busy;
   elements.backToCamera.disabled = state.mode !== 'photo' || state.busy;
   elements.compare.hidden = !active || !state.hasMask;
@@ -143,6 +150,9 @@ function clearMask() {
   state.maskQuality = 'live';
   state.hasMask = false;
   state.maskWidth = state.maskHeight = 0;
+  state.frozenEffectTime = 0;
+  maskRevision++;
+  occupancyCache = null;
   maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
   refreshControls();
 }
@@ -177,13 +187,13 @@ function drawFrame(targetCanvas = elements.canvas, targetContext = ctx) {
   targetContext.drawImage(source, x, y, width, height, 0, 0, w, h);
 
   if (state.hasMask && !state.comparing) {
-    // The segmentation image covers the *whole source frame*, not just its crop.
-    // Matching source and mask crops prevents mismatched silhouettes.
     const mx = x / state.mediaWidth * state.maskWidth;
     const my = y / state.mediaHeight * state.maskHeight;
     const mw = width / state.mediaWidth * state.maskWidth;
     const mh = height / state.mediaHeight * state.maskHeight;
-    targetContext.drawImage(maskCanvas, mx, my, mw, mh, 0, 0, w, h);
+    const effectTime = state.mode === 'camera' ? performance.now() : state.frozenEffectTime;
+    renderPixelOverlay(w, h, { mx, my, mw, mh }, effectTime);
+    targetContext.drawImage(overlayCanvas, 0, 0, w, h);
   }
   targetContext.restore();
 }
@@ -192,9 +202,93 @@ function hexRgb(color) {
   return [parseInt(color.slice(1, 3), 16), parseInt(color.slice(3, 5), 16), parseInt(color.slice(5, 7), 16)];
 }
 
+function mixChannel(a, b, amount) {
+  return Math.round(a + (b - a) * amount);
+}
+
+function buildPixelPalette() {
+  const base = hexRgb(state.color);
+  return {
+    light: base.map(v => mixChannel(v, 255, 0.24)),
+    base,
+    shadow: base.map(v => mixChannel(v, 0, 0.18)),
+  };
+}
+
+// Turn the soft neural-network cutout into an intentional grid of square tiles.
+// Crucially, the grid *itself* defines the silhouette edge, rather than drawing
+// a sharp pixel pattern under the same visibly inaccurate smooth outline.
+function getPixelOccupancy(width, height, crop) {
+  const cell = Math.max(12, Math.round(Math.min(width, height) / 37));
+  const cols = Math.ceil(width / cell);
+  const rows = Math.ceil(height / cell);
+  const key = `${maskRevision}:${width}:${height}:${cell}:${crop.mx.toFixed(3)}:${crop.my.toFixed(3)}:${crop.mw.toFixed(3)}:${crop.mh.toFixed(3)}`;
+  if (occupancyCache?.key === key) return occupancyCache;
+
+  occupancyCanvas.width = cols;
+  occupancyCanvas.height = rows;
+  occupancyCtx.clearRect(0, 0, cols, rows);
+  // Browser resampling here effectively averages each mask tile's coverage.
+  occupancyCtx.drawImage(maskCanvas, crop.mx, crop.my, crop.mw, crop.mh, 0, 0, cols, rows);
+  const rgba = occupancyCtx.getImageData(0, 0, cols, rows).data;
+  const coverage = new Uint8Array(cols * rows);
+  for (let i = 0; i < coverage.length; i++) coverage[i] = rgba[i * 4 + 3];
+  occupancyCache = { key, coverage, cols, rows, cell };
+  return occupancyCache;
+}
+
+// Subtle continuous directional color waves and breathing movement of each
+// square make the field feel spatial and alive without a frantic glitch effect.
+function renderPixelOverlay(width, height, crop, timeMs) {
+  if (overlayCanvas.width !== width) overlayCanvas.width = width;
+  if (overlayCanvas.height !== height) overlayCanvas.height = height;
+  overlayCtx.clearRect(0, 0, width, height);
+  const { coverage, cols, rows, cell } = getPixelOccupancy(width, height, crop);
+  const { light, base, shadow } = buildPixelPalette();
+  const colors = [
+    `rgb(${light.join(',')})`,
+    `rgb(${base.join(',')})`,
+    `rgb(${shadow.join(',')})`,
+  ];
+  const t = timeMs * 0.001;
+  const gap = Math.max(1, Math.round(cell * 0.1));
+  const size = cell - gap;
+  let previousStyle = '';
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const i = row * cols + col;
+      const amount = coverage[i] / 255;
+      // Strong inner pixels remain consistently filled; ambiguous boundary
+      // pixels become sparse squares rather than smeared AI-cutout borders.
+      const hash = ((col * 73 + row * 139 + col * row * 17) % 101) / 101;
+      if (amount < (amount > 0.72 ? 0.16 : 0.28 + hash * 0.23)) continue;
+      const flow = Math.sin(col * 0.38 + row * 0.26 - t * 1.35 + hash * 0.7);
+      const shimmer = Math.cos(col * 0.31 - row * 0.19 + t * 0.55);
+      const tone = flow + 0.25 * shimmer > 0.67 ? 0 : flow < -0.65 ? 2 : 1;
+      if (colors[tone] !== previousStyle) {
+        previousStyle = colors[tone];
+        overlayCtx.fillStyle = previousStyle;
+      }
+      const xDrift = Math.sin(t * 0.85 + row * 0.33 + hash * 5.1) * cell * 0.11;
+      const yDrift = Math.cos(t * 0.68 + col * 0.41 + hash * 4.2) * cell * 0.13;
+      // Intentionally omit squares at some edges to create a floating breakup.
+      const edge = amount < 0.7;
+      const pixelSize = edge ? Math.round(size * 0.77) : size;
+      const center = (cell - pixelSize) / 2;
+      overlayCtx.globalAlpha = edge ? Math.min(0.92, 0.54 + amount * 0.6) : 0.96;
+      overlayCtx.fillRect(
+        Math.round(col * cell + center + xDrift),
+        Math.round(row * cell + center + yDrift),
+        pixelSize, pixelSize
+      );
+    }
+  }
+  overlayCtx.globalAlpha = 1;
+}
+
 function paintMask() {
   if (!state.confidence || !state.maskWidth || !state.maskHeight) return;
-  const [r, g, b] = hexRgb(state.color);
   const width = state.maskWidth, height = state.maskHeight;
   if (maskCanvas.width !== width) maskCanvas.width = width;
   if (maskCanvas.height !== height) maskCanvas.height = height;
@@ -202,14 +296,15 @@ function paintMask() {
   const data = image.data;
   for (let i = 0; i < state.confidence.length; i++) {
     const value = state.confidence[i];
-    // Crisp Photoshop-like matte: opaque interior, narrow anti-aliased edge.
     const p = i * 4;
-    data[p] = r;
-    data[p + 1] = g;
-    data[p + 2] = b;
+    data[p] = 255;
+    data[p + 1] = 255;
+    data[p + 2] = 255;
     data[p + 3] = alphaFromConfidence(value, state.maskQuality);
   }
   maskCtx.putImageData(image, 0, 0);
+  maskRevision++;
+  occupancyCache = null;
   state.hasMask = true;
   refreshControls();
   drawFrame();
@@ -404,6 +499,7 @@ async function loadPhoto(file) {
     state.mediaWidth = photo.width;
     state.mediaHeight = photo.height;
     state.mode = 'photo';
+    state.frozenEffectTime = performance.now();
     hideEmpty();
     drawFrame();
     await setModelMode('IMAGE');
@@ -446,6 +542,7 @@ async function captureFrame() {
     releasePhoto();
     state.mode = 'photo';
     clearMask();
+    state.frozenEffectTime = performance.now();
     state.photo = snapshot;
     drawFrame();
     notify('Refining the silhouette…', 6000);
