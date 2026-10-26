@@ -41,6 +41,8 @@ Internet access is required to load the library and model, especially on first u
 - `index.html` — app UI and interaction controls
 - `styles.css` — responsive camera-first visual design
 - `app.js` — camera, segmentation, canvas compositor, save/share
+- `person-mask.mjs` — handles single/multi-channel MediaPipe masks and category fallback
+- `tests/person-mask.test.mjs` — regression coverage for mask output shapes
 
 ## What to test on an actual device
 
@@ -53,3 +55,15 @@ Internet access is required to load the library and model, especially on first u
 ## Future filter architecture
 
 `applySegmentation()` receives the person confidence mask; `paintMask()` is the renderer. Other filters (halftone, negative-space, multiple colors) can be implemented in new renderers without rebuilding the camera/photo pipeline. Distinct colors for each person would require a separate instance-segmentation or person-tracking pipeline.
+## Run checks
+
+```bash
+node --test
+node --check app.js
+```
+
+The Safari bug fixed in October 2026: the selfie model can return a *single*
+foreground confidence mask. Previously the app always indexed `confidenceMasks[1]`
+and displayed “Person mask unavailable” for valid output. We now support single-
+and dual-channel masks, plus category-mask fallback. Real-device testing is still
+required for camera smoothness and subject selection.
