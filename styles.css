@@ -162,3 +162,24 @@ button:disabled { cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; }
 }
+
+/* FIGURES · video and motion controls */
+.record-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 34px; padding: 0 12px; border: 1px solid #414141;
+  border-radius: 18px; background: #242424; color: #f3f3f3;
+  font-size: 12px; font-weight: 650; letter-spacing: -.01em;
+}
+.record-button:disabled { opacity: .38; }
+.record-button.is-recording { background: #3a191a; border-color: #b64a51; color: #fff; }
+.record-dot { display: block; width: 9px; height: 9px; background: #fb4e54; border-radius: 50%; }
+.record-button.is-recording .record-dot { border-radius: 2px; }
+.record-clock { position: absolute; right: 0; top: 34px; color: white;
+  font-size: 11px; font-weight: 650; padding: 6px 10px; border-radius: 10px;
+  background: rgba(117,22,26,.85); }
+.clip-modal { display: flex; flex-direction: column; gap: 12px; }
+.clip-modal h2 { margin: 2px 0 0; }
+#clipPreview { width: 100%; max-height: 50vh; background: #090909; border-radius: 13px; }
+.save-clip { width: 100%; margin-top: 4px; }
+.clip-note { text-align: center; margin: 0 !important; font-size: 11px !important; }
+@media (max-height: 680px) { .record-button { min-height: 28px; } .clip-modal { gap: 7px; } }
