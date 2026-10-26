@@ -57,6 +57,26 @@ button:disabled { cursor: not-allowed; }
   color: #fff; font-size: 10px; font-weight: 650; letter-spacing: .08em;
 }
 .live-dot { width: 6px; height: 6px; background: #a6ef74; border-radius: 50%; }
+/* One-tap background isolation, within easy reach of the live viewfinder. */
+.backdrop-toggle {
+  position: absolute; left: 19px; top: 57px; z-index: 4;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 34px; padding: 0 12px;
+  border: 1px solid rgba(255,255,255,.20); border-radius: 18px;
+  background: rgba(14,14,14,.65); color: #f8f8f8;
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  font-size: 11px; font-weight: 630; letter-spacing: .01em;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.backdrop-toggle:active:not(:disabled) { transform: scale(.96); }
+.backdrop-toggle.is-active { background: #f5fc66; border-color: #f5fc66; color: #10110b; }
+.backdrop-toggle:disabled { opacity: .5; }
+.backdrop-toggle-icon {
+  width: 13px; height: 13px; border-radius: 4px;
+  border: 1px solid currentColor;
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+}
+
 .view-bottom { bottom: 15px; font-size: 10px; font-weight: 620; letter-spacing: .06em; text-shadow: 0 1px 8px #000b; }
 .scene-tip { color: #e0e0e0; font-weight: 480; }
 .empty-state {
