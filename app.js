@@ -5,6 +5,8 @@
  * The JS/WASM bundle and model are fetched from public CDNs on first use.
  */
 
+import { extractPersonMask } from './person-mask.mjs';
+
 const MEDIAPIPE_VERSION = '1.1.1';
 const PACKAGE_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}`;
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
@@ -200,17 +202,19 @@ function paintMask() {
 }
 
 function applySegmentation(result) {
-  const masks = result.confidenceMasks;
-  // For the SelfieSegmenter model: 0 = background, 1 = person.
-  const personMask = masks?.[1];
-  if (!personMask) {
-    notify('Person mask unavailable. Try another photo or camera.');
+  const mask = extractPersonMask(result);
+  if (!mask) {
+    // This means the model returned no usable mask, not that the scene lacks a person.
+    if (!state.hasMask) notify('Detection output unavailable. Please reopen the camera.', 5200);
+    console.warn('No usable segmentation mask:', {
+      confidenceChannels: result?.confidenceMasks?.length ?? 0,
+      categoryMask: Boolean(result?.categoryMask),
+    });
     return;
   }
-  state.maskWidth = personMask.width;
-  state.maskHeight = personMask.height;
-  // Make an owned copy before the MediaPipe callback finishes / mask is closed.
-  state.confidence = new Float32Array(personMask.getAsFloat32Array());
+  state.maskWidth = mask.width;
+  state.maskHeight = mask.height;
+  state.confidence = mask.confidence;
   paintMask();
 }
 
@@ -224,7 +228,7 @@ async function loadModel() {
       baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' },
       runningMode: 'VIDEO',
       outputConfidenceMasks: true,
-      outputCategoryMask: false,
+      outputCategoryMask: true,
     });
     state.model = segmenter;
     state.modelMode = 'VIDEO';
