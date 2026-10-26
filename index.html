@@ -26,6 +26,7 @@
         <div class="view-top" id="viewTop" aria-hidden="true">
           <div class="mode-tag">PIXEL</div>
           <div class="live-tag" id="liveTag" hidden><span class="live-dot"></span> LIVE</div>
+          <div id="recordClock" class="record-clock" hidden>8s left</div>
         </div>
 
         <div class="empty-state" id="emptyState">
@@ -75,6 +76,7 @@
           </button>
         </div>
         <div class="controls-footer" aria-label="Additional camera options">
+          <button class="record-button" id="recordButton" aria-label="Record an 8-second clip" aria-pressed="false" hidden><span class="record-dot"></span><span>Record 8s</span></button>
           <button class="footer-link" id="compareButton" disabled hidden>Hold to compare</button>
           <button class="footer-link" id="backToCameraButton" disabled hidden>Back to camera</button>
         </div>
@@ -89,8 +91,18 @@
         </button>
         <p class="modal-kicker">FIGURES · EXPERIMENT 01</p>
         <h2 id="modalTitle">A different way to see.</h2>
-        <p>People become moving pixel figures while the world around them stays the same. Pick a shade, take a photo, and save it.</p>
+        <p>People become floating, confidence-driven pixels with motion echoes. Record an 8-second silent clip or capture a still. Individual silhouettes are tracked approximately when separated.</p>
         <p>Image processing happens on your device. Your camera and photos aren't uploaded to an app server. MediaPipe resources are fetched when you first use the effect.</p>
+      </div>
+    </div>
+    <div class="modal-backdrop video-preview-modal" id="videoPreviewModal" hidden>
+      <div class="modal clip-modal" role="dialog" aria-modal="true" aria-labelledby="clipTitle">
+        <button class="modal-close" id="closeClipButton" aria-label="Close clip preview">×</button>
+        <p class="modal-kicker">FIGURES · LIVING PIXELS</p>
+        <h2 id="clipTitle">Your moving moment.</h2>
+        <video id="clipPreview" controls playsinline preload="metadata"></video>
+        <button class="primary-button save-clip" id="saveClipButton">Save video</button>
+        <p class="clip-note">Up to 8 seconds · No audio · Recorded on your device</p>
       </div>
     </div>
     <input type="file" id="fileInput" accept="image/*" hidden />
