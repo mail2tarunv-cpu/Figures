@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#080808" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="description" content="FIGURES — a playful camera that turns people into solid color." />
+    <meta name="description" content="FIGURES — a playful camera that turns people into moving pixel figures." />
     <title>FIGURES — Camera</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -24,7 +24,7 @@
         <video id="cameraVideo" playsinline autoplay muted aria-hidden="true"></video>
 
         <div class="view-top" id="viewTop" aria-hidden="true">
-          <div class="mode-tag">SOLID</div>
+          <div class="mode-tag">PIXEL</div>
           <div class="live-tag" id="liveTag" hidden><span class="live-dot"></span> LIVE</div>
         </div>
 
@@ -37,7 +37,7 @@
           </div>
           <div class="empty-content">
             <h1>See people<br /><span>differently.</span></h1>
-            <p>Turn the people in your frame into color. Keep everything else as it is.</p>
+            <p>Turn the people in your frame into moving pixels. Keep everything else as it is.</p>
             <div class="start-actions">
               <button class="primary-button" id="startButton">Open camera</button>
               <button class="text-button" id="uploadStartButton">Choose a photo instead</button>
@@ -49,14 +49,14 @@
 
         <div class="view-bottom" id="viewBottom" hidden>
           <span class="scene-label">FIGURES · 01</span>
-          <span class="scene-tip">SOLID COLOR</span>
+          <span class="scene-tip">PIXEL FLOW</span>
         </div>
       </section>
 
       <section class="controls" aria-label="Camera controls">
         <div class="colors-panel">
           <div class="colors-title">COLOR</div>
-          <div class="swatch-row" role="group" aria-label="Choose silhouette color">
+          <div class="swatch-row" role="group" aria-label="Choose figure color">
             <button class="swatch selected" data-color="#F5FC66" style="--swatch:#F5FC66" aria-label="Acid yellow" aria-pressed="true"></button>
             <button class="swatch" data-color="#FF765B" style="--swatch:#FF765B" aria-label="Coral" aria-pressed="false"></button>
             <button class="swatch" data-color="#C6A4F7" style="--swatch:#C6A4F7" aria-label="Lavender" aria-pressed="false"></button>
@@ -89,7 +89,7 @@
         </button>
         <p class="modal-kicker">FIGURES · EXPERIMENT 01</p>
         <h2 id="modalTitle">A different way to see.</h2>
-        <p>People become solid color while the world around them stays the same. Pick a shade, take a photo, and save it.</p>
+        <p>People become moving pixel figures while the world around them stays the same. Pick a shade, take a photo, and save it.</p>
         <p>Image processing happens on your device. Your camera and photos aren't uploaded to an app server. MediaPipe resources are fetched when you first use the effect.</p>
       </div>
     </div>
