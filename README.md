@@ -27,7 +27,7 @@ A working browser MVP for the original idea: **turn people into solid-color silh
 3. Open `http://localhost:8000` in Chrome, Safari, or another modern browser.
 4. Select **Open camera** and grant permission, or upload a photograph.
 
-For mobile phones, deploy the three web files (`index.html`, `styles.css`, `app.js`) to **an HTTPS website**, e.g., Vercel/Netlify. Merely opening your laptop's `http://192.168...` URL on a phone will not grant camera access because it is not a secure context. Browsers require HTTPS or localhost for camera permission.
+For mobile phones, deploy the three web files (`index.html`, `styles.css`, `app.js`, `person-mask.mjs`) to **an HTTPS website**, e.g., Vercel/Netlify. Merely opening your laptop's `http://192.168...` URL on a phone will not grant camera access because it is not a secure context. Browsers require HTTPS or localhost for camera permission.
 
 ## Dependencies
 
@@ -55,6 +55,7 @@ Internet access is required to load the library and model, especially on first u
 ## Future filter architecture
 
 `applySegmentation()` receives the person confidence mask; `paintMask()` is the renderer. Other filters (halftone, negative-space, multiple colors) can be implemented in new renderers without rebuilding the camera/photo pipeline. Distinct colors for each person would require a separate instance-segmentation or person-tracking pipeline.
+
 ## Run checks
 
 ```bash
