@@ -100,6 +100,8 @@ function refreshControls() {
   elements.shutter.disabled = !active || !state.hasMask;
   elements.compare.disabled = !active || !state.hasMask;
   elements.backToCamera.disabled = state.mode !== 'photo' || state.busy;
+  elements.compare.hidden = !active || !state.hasMask;
+  elements.backToCamera.hidden = state.mode !== 'photo';
   for (const button of elements.colorButtons) {
     const selected = button.dataset.color === state.color;
     button.classList.toggle('selected', selected);
@@ -336,7 +338,7 @@ async function startCamera() {
     if (session === state.session) {
       state.busy = false;
       elements.start.disabled = false;
-      elements.start.innerHTML = 'Open camera <span aria-hidden="true">↗</span>';
+      elements.start.textContent = 'Open camera';
       refreshControls();
     }
   }
