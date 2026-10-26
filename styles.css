@@ -122,7 +122,9 @@ button:disabled { cursor: not-allowed; }
 }
 .shutter:active:not(:disabled) { transform: scale(.91); }
 .shutter:disabled { opacity: .45; }
-.shutter-center { width: 100%; height: 100%; border-radius: 50%; background: #fff; }
+.shutter-center { width: 100%; height: 100%; border-radius: 50%; background: #fff; display: grid; place-items: center; }
+/* Once a frame is frozen/refined the same prominent control becomes Save. */
+.shutter.save-mode .shutter-center::after { content: '↓'; color: #111; font-size: 30px; line-height: 1; font-weight: 650; margin-top: -3px; }
 .controls-footer { display: flex; align-items: center; justify-content: center; gap: 24px; min-height: 24px; }
 .footer-link { min-height: 28px; padding: 0 4px; border: 0; background: none; color: #c9c9c9; font-size: 12px; font-weight: 530; }
 .footer-link:active { color: #fff; }
