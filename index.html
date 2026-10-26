@@ -20,7 +20,7 @@
       </header>
 
       <section class="viewfinder" id="viewfinder" aria-label="Camera preview">
-        <canvas id="outputCanvas" width="900" height="1200" aria-label="Live camera or photo with recolored human silhouettes"></canvas>
+        <canvas id="outputCanvas" width="900" height="1200" aria-label="Live camera or photo with animated pixel figures"></canvas>
         <video id="cameraVideo" playsinline autoplay muted aria-hidden="true"></video>
 
         <div class="view-top" id="viewTop" aria-hidden="true">
@@ -28,6 +28,11 @@
           <div class="live-tag" id="liveTag" hidden><span class="live-dot"></span> LIVE</div>
           <div id="recordClock" class="record-clock" hidden>8s left</div>
         </div>
+
+        <button class="backdrop-toggle" id="backdropToggle" type="button" aria-label="Black background" aria-pressed="false" title="Make the background black" hidden>
+          <span class="backdrop-toggle-icon" aria-hidden="true"></span>
+          <span>Black BG</span>
+        </button>
 
         <div class="empty-state" id="emptyState">
           <div class="empty-hero" aria-hidden="true">
@@ -91,7 +96,7 @@
         </button>
         <p class="modal-kicker">FIGURES · EXPERIMENT 01</p>
         <h2 id="modalTitle">A different way to see.</h2>
-        <p>People become floating, confidence-driven pixels with motion echoes. Record an 8-second silent clip or capture a still. Individual silhouettes are tracked approximately when separated.</p>
+        <p>People become floating, confidence-driven pixels with motion echoes. Toggle Black BG to remove the scene behind them. Record an 8-second silent clip or capture a still. Individual silhouettes are tracked approximately when separated.</p>
         <p>Image processing happens on your device. Your camera and photos aren't uploaded to an app server. MediaPipe resources are fetched when you first use the effect.</p>
       </div>
     </div>
