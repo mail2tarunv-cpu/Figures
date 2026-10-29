@@ -24,6 +24,7 @@ const ECHO_LIFETIME_MS = 950;
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 const elements = {
+  app: document.querySelector('.app'),
   canvas: document.querySelector('#outputCanvas'),
   video: document.querySelector('#cameraVideo'),
   empty: document.querySelector('#emptyState'),
@@ -129,6 +130,7 @@ function hideEmpty() {
 
 function refreshControls() {
   const active = state.mode !== 'idle';
+  elements.app.classList.toggle('is-active', active);
   elements.live.hidden = state.mode !== 'camera';
   const isRecording = recording.recorder?.state === 'recording';
   elements.flip.disabled = state.mode !== 'camera' || state.busy || isRecording;
