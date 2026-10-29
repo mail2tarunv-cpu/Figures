@@ -220,7 +220,7 @@ function drawFrame(targetCanvas = elements.canvas, targetContext = ctx) {
   // still frame their shot. Holding Compare always reveals the raw scene.
   // This single compositor path feeds live preview, PNGs, and video recording.
   if (state.blackBackground && state.hasMask && !state.comparing) {
-    targetContext.fillStyle = '#000000';
+    targetContext.fillStyle = '#121212';
     targetContext.fillRect(0, 0, w, h);
   } else {
     targetContext.drawImage(source, x, y, width, height, 0, 0, w, h);
