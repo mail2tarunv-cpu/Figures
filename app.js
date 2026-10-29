@@ -19,7 +19,7 @@ const MAX_LIVE_ANALYSIS_SIDE = 640;
 const MAX_CAPTURE_ANALYSIS_SIDE = 1400;
 const MAX_EXPORT_SIDE = 2400;
 const MIN_ANALYSIS_INTERVAL_MS = 70;
-const RECORD_DURATION_MS = 8000;
+const RECORD_DURATION_MS = 60_000; // Manually stopped desktop clips, limited for browser memory.
 const ECHO_LIFETIME_MS = 950;
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
@@ -41,6 +41,8 @@ const elements = {
   backToCamera: document.querySelector('#backToCameraButton'),
   backdropToggle: document.querySelector('#backdropToggle'),
   record: document.querySelector('#recordButton'),
+  recordLabel: document.querySelector('#recordLabel'),
+  fullscreen: document.querySelector('#fullscreenButton'),
   recordClock: document.querySelector('#recordClock'),
   previewModal: document.querySelector('#videoPreviewModal'),
   previewVideo: document.querySelector('#clipPreview'),
@@ -135,12 +137,13 @@ function refreshControls() {
   elements.record.disabled = state.mode !== 'camera' || state.busy || (!isRecording && !supportsVideoRecording());
   elements.record.classList.toggle('is-recording', isRecording);
   elements.record.setAttribute('aria-pressed', String(isRecording));
-  elements.record.setAttribute('aria-label', isRecording ? 'Stop video recording' : 'Record an 8-second clip');
+  elements.record.setAttribute('aria-label', isRecording ? 'Stop video recording' : 'Record video');
+  elements.recordLabel.textContent = isRecording ? 'Stop recording' : 'Record video';
   elements.shutter.disabled = !active || state.busy || isRecording || (state.mode === 'photo' && !state.hasMask);
   elements.shutter.setAttribute('aria-label', state.mode === 'camera' ? 'Take photo and refine edges' : 'Save edited photo');
   elements.shutter.classList.toggle('save-mode', state.mode === 'photo');
   const sceneTip = elements.viewBottom.querySelector('.scene-tip');
-  if (sceneTip) sceneTip.textContent = state.mode === 'photo' ? 'TAP ↓ TO SAVE' : (isRecording ? 'RECORDING · 8 SEC MAX' : 'LIVING PIXELS');
+  if (sceneTip) sceneTip.textContent = state.mode === 'photo' ? 'TAP ↓ TO SAVE' : (isRecording ? 'RECORDING · TAP STOP TO FINISH' : 'LIVING PIXELS');
   elements.compare.disabled = !active || !state.hasMask || state.busy;
   elements.backToCamera.disabled = state.mode !== 'photo' || state.busy;
   elements.compare.hidden = !active || !state.hasMask;
@@ -667,8 +670,10 @@ function preferredVideoMime() {
 function updateRecordingClock(now = performance.now()) {
   if (recording.recorder?.state !== 'recording') return;
   const elapsed = Math.min(RECORD_DURATION_MS, now - recording.startedAt);
-  const secs = Math.ceil((RECORD_DURATION_MS - elapsed) / 1000);
-  elements.recordClock.textContent = `${secs}s left`;
+  const seconds = Math.floor(elapsed / 1000);
+  const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
+  const ss = String(seconds % 60).padStart(2, '0');
+  elements.recordClock.textContent = `● ${mm}:${ss} / 01:00`;
   if (elapsed >= RECORD_DURATION_MS) stopRecording();
 }
 
@@ -710,7 +715,7 @@ function startRecording() {
       elements.previewModal.hidden = false;
     };
     // Start in direct response to the user's tap (Safari user activation).
-    recorder.start(250);
+    recorder.start(1000);
     recording.timeout = setTimeout(() => stopRecording(), RECORD_DURATION_MS);
     elements.recordClock.hidden = false;
     updateRecordingClock();
@@ -765,6 +770,19 @@ function setComparing(isComparing) {
 
 function initEvents() {
   elements.start.addEventListener('click', startCamera);
+  elements.fullscreen.addEventListener('click', async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.querySelector('.app').requestFullscreen();
+    } catch (error) { console.warn('Fullscreen not available:', error); notify('Fullscreen is unavailable in this browser.'); }
+  });
+  document.addEventListener('fullscreenchange', () => {
+    const expanded = Boolean(document.fullscreenElement);
+    elements.fullscreen.setAttribute('aria-label', expanded ? 'Exit fullscreen' : 'Enter fullscreen');
+    elements.fullscreen.title = expanded ? 'Exit fullscreen' : 'Enter fullscreen';
+    elements.fullscreen.classList.toggle('is-expanded', expanded);
+    syncCanvasResolution();
+  });
   elements.uploadStart.addEventListener('click', () => elements.file.click());
   elements.upload.addEventListener('click', () => elements.file.click());
   elements.file.addEventListener('change', event => loadPhoto(event.target.files?.[0]));
