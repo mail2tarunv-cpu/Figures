@@ -783,6 +783,7 @@ function initEvents() {
     elements.fullscreen.setAttribute('aria-label', expanded ? 'Exit fullscreen' : 'Enter fullscreen');
     elements.fullscreen.title = expanded ? 'Exit fullscreen' : 'Enter fullscreen';
     elements.fullscreen.classList.toggle('is-expanded', expanded);
+    elements.fullscreen.querySelector('span').textContent = expanded ? 'Exit fullscreen' : 'Fullscreen';
     syncCanvasResolution();
   });
   elements.uploadStart.addEventListener('click', () => elements.file.click());
