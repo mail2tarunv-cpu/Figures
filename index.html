@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#080808" />
+    <meta name="theme-color" content="#121212" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="FIGURES — a playful camera that turns people into moving pixel figures." />
@@ -14,9 +14,15 @@
     <main class="app" aria-label="FIGURES camera">
       <header class="header">
         <span class="wordmark" aria-label="Figures">figures<span class="wordmark-period">.</span></span>
-        <button class="icon-button header-info" id="infoButton" aria-label="About FIGURES" title="About FIGURES">
+        <div class="header-actions">
+          <button class="desktop-fullscreen" id="fullscreenButton" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>
+            <span>Fullscreen</span>
+          </button>
+          <button class="icon-button header-info" id="infoButton" aria-label="About FIGURES" title="About FIGURES">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01" stroke-linecap="round"/></svg>
-        </button>
+          </button>
+        </div>
       </header>
 
       <section class="viewfinder" id="viewfinder" aria-label="Camera preview">
@@ -26,7 +32,7 @@
         <div class="view-top" id="viewTop" aria-hidden="true">
           <div class="mode-tag">PIXEL</div>
           <div class="live-tag" id="liveTag" hidden><span class="live-dot"></span> LIVE</div>
-          <div id="recordClock" class="record-clock" hidden>8s left</div>
+          <div id="recordClock" class="record-clock" role="status" hidden>● 00:00 / 01:00</div>
         </div>
 
         <button class="backdrop-toggle" id="backdropToggle" type="button" aria-label="Black background" aria-pressed="false" title="Make the background black" hidden>
@@ -42,8 +48,9 @@
             </svg>
           </div>
           <div class="empty-content">
+            <div class="empty-kicker">FIGURES / EXPERIMENT 01</div>
             <h1>See people<br /><span>differently.</span></h1>
-            <p>Turn the people in your frame into moving pixels. Keep everything else as it is.</p>
+            <p>A camera for moving, living pixels. Watch ordinary moments become something else.</p>
             <div class="start-actions">
               <button class="primary-button" id="startButton">Open camera</button>
               <button class="text-button" id="uploadStartButton">Choose a photo instead</button>
@@ -81,7 +88,7 @@
           </button>
         </div>
         <div class="controls-footer" aria-label="Additional camera options">
-          <button class="record-button" id="recordButton" aria-label="Record an 8-second clip" aria-pressed="false" hidden><span class="record-dot"></span><span>Record 8s</span></button>
+          <button class="record-button" id="recordButton" aria-label="Record video" aria-pressed="false" title="Record video (up to 60 seconds)" hidden><span class="record-dot"></span><span id="recordLabel">Record video</span></button>
           <button class="footer-link" id="compareButton" disabled hidden>Hold to compare</button>
           <button class="footer-link" id="backToCameraButton" disabled hidden>Back to camera</button>
         </div>
@@ -96,7 +103,7 @@
         </button>
         <p class="modal-kicker">FIGURES · EXPERIMENT 01</p>
         <h2 id="modalTitle">A different way to see.</h2>
-        <p>People become floating, confidence-driven pixels with motion echoes. Toggle Black BG to remove the scene behind them. Record an 8-second silent clip or capture a still. Individual silhouettes are tracked approximately when separated.</p>
+        <p>People become floating, confidence-driven pixels with motion echoes. Toggle Black BG to remove the scene behind them. Record up to 60 seconds of silent video or capture a still. Individual silhouettes are tracked approximately when separated.</p>
         <p>Image processing happens on your device. Your camera and photos aren't uploaded to an app server. MediaPipe resources are fetched when you first use the effect.</p>
       </div>
     </div>
@@ -107,7 +114,7 @@
         <h2 id="clipTitle">Your moving moment.</h2>
         <video id="clipPreview" controls playsinline preload="metadata"></video>
         <button class="primary-button save-clip" id="saveClipButton">Save video</button>
-        <p class="clip-note">Up to 8 seconds · No audio · Recorded on your device</p>
+        <p class="clip-note">Up to 60 seconds · No audio · Recorded on your device</p>
       </div>
     </div>
     <input type="file" id="fileInput" accept="image/*" hidden />
