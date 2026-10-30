@@ -472,9 +472,8 @@ async function loadImportedVideo(file) {
   }
 }
 
-// Convert exactly one complete imported clip. The output canvas matches the
-// SOURCE ASPECT RATIO, not the MacBook viewport, so portrait videos export
-// without unwanted landscape letterboxing or UI controls.
+// Export the complete imported clip from the SAME 9:16 canvas as the preview.
+// No interface controls can appear in captureStream().
 function chooseExportMimeType() {
   if (!window.MediaRecorder || typeof window.MediaRecorder.isTypeSupported !== 'function') return '';
   const formats = [
@@ -501,9 +500,9 @@ async function seekToBeginning(video) {
     try { video.currentTime = 0; } catch (err) { cleanup(); reject(err); }
   });
 }
-function saveConvertedBlob(blob, mime) {
+function saveConvertedBlob(blob, mime, filename = state.importedVideoName || 'figures-video') {
   const extension = mime.includes('mp4') ? 'mp4' : 'webm';
-  const stem = (state.importedVideoName || 'figures-video')
+  const stem = filename
     .replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 96) || 'figures-video';
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
@@ -518,7 +517,7 @@ function saveConvertedBlob(blob, mime) {
 async function downloadConvertedVideo() {
   if (state.busy || state.mode !== 'video' || !state.importedVideoUrl) return;
   const mime = chooseExportMimeType();
-  if (!mime || typeof elements.canvas.captureStream !== 'function') {
+  if (!mime || typeof captureCanvas.captureStream !== 'function') {
     notify('Video export is unavailable in this browser. Try Chrome or Safari on Mac.', 6000);
     return;
   }
@@ -528,22 +527,14 @@ async function downloadConvertedVideo() {
     return;
   }
   const before = { time: video.currentTime, loop: video.loop, rate: video.playbackRate };
-  const ratio = Math.min(1, 1440 / Math.max(state.mediaWidth, state.mediaHeight));
-  const w = Math.max(2, Math.round(state.mediaWidth * ratio));
-  const h = Math.max(2, Math.round(state.mediaHeight * ratio));
-  const output = document.createElement('canvas');
-  output.width = w;
-  output.height = h;
-  const outputCtx = output.getContext('2d', { alpha: false });
-  if (!outputCtx || typeof output.captureStream !== 'function') {
-    notify('Canvas video export is not supported here.', 6000);
-    return;
-  }
+  // A 1080x1920 canvas is also the visible portrait composition.
+  // Imported clips are CONTAINED within this frame, never stretched or cropped.
 
   state.busy = true;
   exportSession.active = true;
   elements.importActive.disabled = true;
   elements.importStart.disabled = true;
+  elements.start.disabled = true;
   elements.downloadVideo.disabled = true;
   elements.colorTrigger.disabled = true;
   togglePicker(false);
@@ -564,22 +555,13 @@ async function downloadConvertedVideo() {
     state.lastTimestamp = timestamp;
     state.lastVideoTime = video.currentTime;
     state.lastInferAt = performance.now();
-    const paintExportFrame = now => {
-      outputCtx.fillStyle = STAGE_COLOR;
-      outputCtx.fillRect(0, 0, w, h);
-      if (state.hasMask && state.maskWidth && state.maskHeight) {
-        renderPixelOverlay(w, h, {
-          mx: 0, my: 0, mw: state.maskWidth, mh: state.maskHeight
-        }, now);
-        outputCtx.drawImage(overlayCanvas, 0, 0, w, h);
-      }
-    };
+    const paintExportFrame = () => drawFrame();
     const renderExportFrame = now => {
       paintExportFrame(now);
       frameHandle = requestAnimationFrame(renderExportFrame);
     };
     renderExportFrame(performance.now());
-    stream = output.captureStream(30);
+    stream = captureCanvas.captureStream(30);
     if (!stream.getVideoTracks().length) throw new Error('No canvas video track available.');
     recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6000000 });
     const chunks = [];
@@ -649,6 +631,7 @@ async function downloadConvertedVideo() {
     elements.downloadVideo.disabled = false;
     elements.importActive.disabled = false;
     elements.importStart.disabled = false;
+    elements.start.disabled = false;
     elements.colorTrigger.disabled = false;
     state.busy = false;
     if (state.mode === 'video' && state.importedVideoUrl) {
