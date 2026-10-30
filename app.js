@@ -145,7 +145,7 @@ function drawFrame() {
 function getPixelOccupancy(width, height, crop) {
   // Imported footage is framed small on desktop; use finer, denser pixels to
   // preserve a readable face, arms, legs and the actor's physical performance.
-  const detail = state.mode === 'video' ? 76 : 64;
+  const detail = state.mode === 'video' ? 96 : 64;
   const minimum = state.mode === 'video' ? 5 : 7;
   const cell = Math.max(minimum, Math.round(Math.min(width, height) / detail));
   const cols = Math.ceil(width / cell), rows = Math.ceil(height / cell);
