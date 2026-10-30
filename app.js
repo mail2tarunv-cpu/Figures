@@ -332,6 +332,7 @@ function updatePickerUI() {
   elements.svCursor.style.left=`${picker.s*100}%`;
   elements.svCursor.style.top=`${(1-picker.v)*100}%`;
   elements.hueSlider.value=Math.round(picker.h);
+  elements.svField.setAttribute('aria-valuetext', `Saturation ${Math.round(picker.s*100)} percent, brightness ${Math.round(picker.v*100)} percent`);
   elements.presets.forEach(button=>{
     const selected=button.dataset.color.toUpperCase()===hex;
     button.classList.toggle('is-selected',selected);
@@ -367,6 +368,15 @@ function bindUI() {
   });
   elements.svField.addEventListener('pointerup',e=>{
     if(elements.svField.hasPointerCapture(e.pointerId))elements.svField.releasePointerCapture(e.pointerId);
+  });
+  elements.svField.addEventListener('keydown',e=>{
+    const step=e.shiftKey?.1:.03;
+    if(e.key==='ArrowLeft')picker.s=Math.max(0,picker.s-step);
+    else if(e.key==='ArrowRight')picker.s=Math.min(1,picker.s+step);
+    else if(e.key==='ArrowUp')picker.v=Math.min(1,picker.v+step);
+    else if(e.key==='ArrowDown')picker.v=Math.max(0,picker.v-step);
+    else return;
+    e.preventDefault();updatePickerUI();
   });
   elements.presets.forEach(button=>button.addEventListener('click',()=>setColor(button.dataset.color)));
   document.addEventListener('pointerdown',e=>{
