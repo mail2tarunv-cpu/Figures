@@ -841,6 +841,7 @@ function bindUI() {
   });
   document.addEventListener('visibilitychange',()=>{
     if(document.hidden && exportSession.active) exportSession.abort?.(new Error('Keep the tab visible while exporting video.'));
+    if(document.hidden && liveRecording.recorder?.state === 'recording') stopLiveRecording();
     if(!document.hidden) state.lastInferAt=0;
   });
 }
