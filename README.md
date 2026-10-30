@@ -7,9 +7,9 @@ A **minimal living-pixel experience**: people become floating pixel figures on a
 1. Open [FIGURES](https://figures-delta.vercel.app). Select **Start camera** for the live webcam, or **Import video** to select a local MP4, MOV, M4V or WebM clip.
 2. The device runs MediaPipe person segmentation locally. The figure becomes floating pixels, with short motion echoes. Imported videos play in a loop and are **contained** within the dark stage instead of cropped, preserving the full actor.
 3. Use the **Color** control at the bottom to drag through saturation/brightness, scrub the hue spectrum, or choose a preset. Colors change immediately.
-4. With a video playing, click **Import video** in the top-right to replace the clip. Only one source plays at a time.
+4. With a video playing, click **Download video** in the top-right to export the converted clip, or **Import video** to replace it. Export runs once from the start of the source and restores playback when done. Only one source plays at a time.
 
-This is **viewing-only**. Importing a video is local-only: there is **no uploading to a server, photo capture, processed-video export, recording, sharing, or background toggle**. The background is always #121212, including while no person is detected. The generated pixel version can be previewed but is not yet saved as an MP4.
+Importing and exporting video stays **local to your device**. In imported-video mode, click **Download video** to process one complete pass and save the pixel version in the original source aspect ratio. The output is a silent MP4 or WebM depending on browser support (up to two minutes; keep the tab visible while rendering). The live webcam has no record or download control. There is no uploading to a server, photo capture, or background toggle; the stage is always #121212.
 
 Mac shortcuts: **C** opens or closes the color picker, **F** enters or exits fullscreen, **Esc** closes the picker. On mobile, tap the color control. Webcam permission requires HTTPS or localhost. MP4 with H.264 is the most widely compatible format; MOV and WebM depend on browser and codec support.
 
