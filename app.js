@@ -474,6 +474,110 @@ async function loadImportedVideo(file) {
 
 // Export the complete imported clip from the SAME 9:16 canvas as the preview.
 // No interface controls can appear in captureStream().
+function updateRecordingClock() {
+  const elapsed = Math.min(MAX_RECORD_MS, Math.max(0, Date.now() - liveRecording.started));
+  const seconds = Math.floor(elapsed / 1000);
+  const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
+  const ss = String(seconds % 60).padStart(2, '0');
+  elements.recordClock.textContent = `● ${mm}:${ss} / 01:00`;
+}
+function resetLiveRecordingUI() {
+  clearInterval(liveRecording.timer);
+  clearTimeout(liveRecording.maxTimer);
+  liveRecording.timer = null;
+  liveRecording.maxTimer = null;
+  liveRecording.recorder = null;
+  liveRecording.stream?.getTracks().forEach(track => track.stop());
+  liveRecording.stream = null;
+  liveRecording.chunks = [];
+  elements.recordLabel.textContent = 'Record';
+  elements.recordButton.classList.remove('is-recording');
+  elements.recordButton.disabled = false;
+  elements.recordClock.hidden = true;
+  elements.start.disabled = false;
+  elements.importStart.disabled = false;
+  elements.importActive.disabled = false;
+  if (state.mode === 'camera') elements.captureNote.textContent = 'Record the pixels, not the camera image.';
+}
+function stopLiveRecording() {
+  const recorder = liveRecording.recorder;
+  if (!recorder || recorder.state !== 'recording') return;
+  clearTimeout(liveRecording.maxTimer);
+  clearInterval(liveRecording.timer);
+  elements.recordLabel.textContent = 'Saving…';
+  elements.recordButton.disabled = true;
+  try { recorder.stop(); }
+  catch (error) {
+    console.error('Recording stop failed:', error);
+    resetLiveRecordingUI();
+    notify('Could not finish the recording.', 5000);
+  }
+}
+function toggleLiveRecording() {
+  if (liveRecording.recorder?.state === 'recording') { stopLiveRecording(); return; }
+  if (state.mode !== 'camera' || state.busy || exportSession.active || liveRecording.recorder) return;
+  const mime = chooseExportMimeType();
+  if (!mime || typeof captureCanvas.captureStream !== 'function') {
+    notify('Recording is unsupported in this browser. Try Chrome or Safari on Mac.', 6000);
+    return;
+  }
+  try {
+    // Seed the first frame so the exported file has no blank beginning.
+    drawFrame();
+    liveRecording.stream = captureCanvas.captureStream(30);
+    if (!liveRecording.stream.getVideoTracks().length) throw new Error('No capture track');
+    const recorder = new MediaRecorder(liveRecording.stream, {
+      mimeType: mime, videoBitsPerSecond: 6000000
+    });
+    liveRecording.recorder = recorder;
+    liveRecording.mime = mime;
+    liveRecording.chunks = [];
+    recorder.ondataavailable = event => {
+      if (event.data?.size) liveRecording.chunks.push(event.data);
+    };
+    recorder.onerror = event => {
+      console.error('FIGURES recorder error:', event.error);
+      notify('Recording failed. Try another browser.', 5000);
+      if (recorder.state === 'recording') stopLiveRecording();
+    };
+    recorder.onstop = () => {
+      try {
+        const chunks = liveRecording.chunks;
+        if (!chunks.length) {
+          notify('No frames were recorded. Try again.', 5000);
+        } else {
+          const type = recorder.mimeType || mime;
+          const clip = new Blob(chunks, { type });
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+          saveConvertedBlob(clip, type, `figures-live-${stamp}`);
+          notify('Portrait recording downloaded.', 4200);
+        }
+      } catch (error) {
+        console.error('Could not save recording:', error);
+        notify('Could not save this recording.', 5500);
+      } finally {
+        resetLiveRecordingUI();
+      }
+    };
+    recorder.start(500);
+    liveRecording.started = Date.now();
+    elements.recordButton.classList.add('is-recording');
+    elements.recordLabel.textContent = 'Stop recording';
+    elements.recordClock.hidden = false;
+    elements.start.disabled = true;
+    elements.importStart.disabled = true;
+    elements.importActive.disabled = true;
+    elements.captureNote.textContent = 'Recording the 9:16 pixel canvas.';
+    updateRecordingClock();
+    liveRecording.timer = setInterval(updateRecordingClock, 160);
+    liveRecording.maxTimer = setTimeout(stopLiveRecording, MAX_RECORD_MS);
+  } catch (error) {
+    console.error('Could not record FIGURES:', error);
+    resetLiveRecordingUI();
+    notify('Recording unavailable. Check browser media support.', 5500);
+  }
+}
+
 function chooseExportMimeType() {
   if (!window.MediaRecorder || typeof window.MediaRecorder.isTypeSupported !== 'function') return '';
   const formats = [
@@ -705,6 +809,7 @@ function bindUI() {
   elements.importStart.addEventListener('click',chooseVideo);
   elements.importActive.addEventListener('click',chooseVideo);
   elements.downloadVideo.addEventListener('click',downloadConvertedVideo);
+  elements.recordButton.addEventListener('click',toggleLiveRecording);
   elements.fileInput.addEventListener('change',event => {
     void loadImportedVideo(event.target.files?.[0]);
   });
