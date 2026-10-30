@@ -1,123 +1,66 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#121212" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="description" content="FIGURES — a playful camera that turns people into moving pixel figures." />
-    <title>FIGURES — Camera</title>
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <main class="app" aria-label="FIGURES camera">
-      <header class="header">
-        <span class="wordmark" aria-label="Figures">figures<span class="wordmark-period">.</span></span>
-        <div class="header-actions">
-          <button class="desktop-fullscreen" id="fullscreenButton" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>
-            <span>Fullscreen</span>
-          </button>
-          <button class="icon-button header-info" id="infoButton" aria-label="About FIGURES" title="About FIGURES">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01" stroke-linecap="round"/></svg>
-          </button>
-        </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#121212" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="description" content="FIGURES — people, reimagined as living pixels." />
+  <title>FIGURES — Living Pixels</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app" aria-label="FIGURES living pixels">
+    <section class="stage" id="stage" aria-label="Live moving pixel figures">
+      <canvas id="outputCanvas" aria-label="Animated human figures on a dark background"></canvas>
+      <video id="cameraVideo" playsinline autoplay muted aria-hidden="true"></video>
+
+      <header class="topbar">
+        <div class="wordmark" aria-label="FIGURES">figures<span>.</span></div>
+        <div class="live-indicator" id="liveIndicator" hidden><span class="live-dot"></span> LIVE</div>
       </header>
 
-      <section class="viewfinder" id="viewfinder" aria-label="Camera preview">
-        <canvas id="outputCanvas" width="900" height="1200" aria-label="Live camera or photo with animated pixel figures"></canvas>
-        <video id="cameraVideo" playsinline autoplay muted aria-hidden="true"></video>
-
-        <div class="view-top" id="viewTop" aria-hidden="true">
-          <div class="mode-tag">PIXEL</div>
-          <div class="live-tag" id="liveTag" hidden><span class="live-dot"></span> LIVE</div>
-          <div id="recordClock" class="record-clock" role="status" hidden>● 00:00 / 01:00</div>
-        </div>
-
-        <button class="backdrop-toggle" id="backdropToggle" type="button" aria-label="Black background" aria-pressed="false" title="Make the background black" hidden>
-          <span class="backdrop-toggle-icon" aria-hidden="true"></span>
-          <span>Black BG</span>
-        </button>
-
-        <div class="empty-state" id="emptyState">
-          <div class="empty-hero" aria-hidden="true">
-            <svg viewBox="0 0 120 148" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="60" cy="27" r="23" fill="#E9FA6A"/>
-              <path d="M27 67C32 59 44 55 60 55S88 59 93 67L107 116C109 123 105 128 99 129C93 130 89 127 87 121L82 103V145H64L60 111L56 145H38V103L33 121C31 127 27 130 21 129C15 128 11 123 13 116L27 67Z" fill="#E9FA6A"/>
-            </svg>
-          </div>
-          <div class="empty-content">
-            <div class="empty-kicker">FIGURES / EXPERIMENT 01</div>
-            <h1>See people<br /><span>differently.</span></h1>
-            <p>A camera for moving, living pixels. Watch ordinary moments become something else.</p>
-            <div class="start-actions">
-              <button class="primary-button" id="startButton">Open camera</button>
-              <button class="text-button" id="uploadStartButton">Choose a photo instead</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-
-        <div class="view-bottom" id="viewBottom" hidden>
-          <span class="scene-label">FIGURES · 01</span>
-          <span class="scene-tip">PIXEL FLOW</span>
-        </div>
-      </section>
-
-      <section class="controls" aria-label="Camera controls">
-        <div class="colors-panel">
-          <div class="colors-title">COLOR</div>
-          <div class="swatch-row" role="group" aria-label="Choose figure color">
-            <button class="swatch selected" data-color="#F5FC66" style="--swatch:#F5FC66" aria-label="Acid yellow" aria-pressed="true"></button>
-            <button class="swatch" data-color="#FF765B" style="--swatch:#FF765B" aria-label="Coral" aria-pressed="false"></button>
-            <button class="swatch" data-color="#C6A4F7" style="--swatch:#C6A4F7" aria-label="Lavender" aria-pressed="false"></button>
-            <button class="swatch" data-color="#6BD4DD" style="--swatch:#6BD4DD" aria-label="Cyan" aria-pressed="false"></button>
-            <button class="swatch" data-color="#FFFFFF" style="--swatch:#FFFFFF" aria-label="White" aria-pressed="false"></button>
-          </div>
-        </div>
-
-        <div class="capture-row">
-          <button class="utility-button" id="uploadButton" aria-label="Choose photo from library" title="Choose photo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 18 5.2-5 4.1 3.1 3-3.7 4.2 5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="intro" id="intro">
+        <div class="intro-content">
+          <p class="eyebrow">AN EXPERIMENT IN SEEING</p>
+          <h1>People,<br /><em>reimagined.</em></h1>
+          <p class="intro-subtitle">You are the canvas. Move, and watch your figure come alive.</p>
+          <button class="start-button" id="startButton" type="button">
+            <span>Start camera</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
           </button>
-          <button class="shutter" id="shutterButton" aria-label="Save a photo" disabled><span class="shutter-center"></span></button>
-          <button class="utility-button" id="flipButton" aria-label="Switch camera" title="Switch camera" disabled>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8V6a3 3 0 0 0-3-3H6l3-2.5M6 3l3 2.5"/><path d="M4 16v2a3 3 0 0 0 3 3h11l-3 2.5M18 21l-3-2.5"/><rect x="7.5" y="7.5" width="9" height="9" rx="2"/></svg>
-          </button>
+          <p class="privacy-note">Processed on your device. Nothing is recorded.</p>
         </div>
-        <div class="controls-footer" aria-label="Additional camera options">
-          <button class="record-button" id="recordButton" aria-label="Record video" aria-pressed="false" title="Record video (up to 60 seconds)" hidden><span class="record-dot"></span><span id="recordLabel">Record video</span></button>
-          <button class="footer-link" id="compareButton" disabled hidden>Hold to compare</button>
-          <button class="footer-link" id="backToCameraButton" disabled hidden>Back to camera</button>
-        </div>
-      </section>
-    </main>
+      </div>
 
-    <div class="modal-backdrop" id="aboutModal" hidden>
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-        <div class="modal-grabber" aria-hidden="true"></div>
-        <button class="modal-close" id="closeAbout" aria-label="Close about panel">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" stroke-linecap="round"/></svg>
+      <p class="camera-hint" id="cameraHint" hidden>Step into the frame</p>
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+      <div class="color-dock" id="colorDock" hidden>
+        <div class="palette-panel" id="palettePanel" hidden>
+          <div class="palette-heading"><span>COLOR</span><span class="palette-note">DRAG TO EXPLORE</span></div>
+          <div class="sv-field" id="svField" role="slider" aria-label="Choose saturation and brightness" aria-valuetext="Drag to select a color" tabindex="0">
+            <span class="sv-cursor" id="svCursor"></span>
+          </div>
+          <input id="hueSlider" class="hue-slider" type="range" min="0" max="359" value="65" aria-label="Hue" />
+          <div class="palette-presets" role="group" aria-label="Quick colors">
+            <button class="preset" type="button" style="--preset:#F5FC66" data-color="#F5FC66" aria-label="Acid yellow" aria-pressed="true"></button>
+            <button class="preset" type="button" style="--preset:#FF765B" data-color="#FF765B" aria-label="Coral" aria-pressed="false"></button>
+            <button class="preset" type="button" style="--preset:#C6A4F7" data-color="#C6A4F7" aria-label="Lavender" aria-pressed="false"></button>
+            <button class="preset" type="button" style="--preset:#6BD4DD" data-color="#6BD4DD" aria-label="Cyan" aria-pressed="false"></button>
+            <button class="preset" type="button" style="--preset:#FFFFFF" data-color="#FFFFFF" aria-label="White" aria-pressed="false"></button>
+          </div>
+        </div>
+        <button class="color-trigger" id="colorTrigger" type="button" aria-label="Adjust particle color" aria-controls="palettePanel" aria-expanded="false">
+          <span class="color-preview" id="colorPreview"></span>
+          <span class="control-label">Color</span>
+          <span class="color-hex" id="colorHex">#F5FC66</span>
+          <svg class="dock-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg>
         </button>
-        <p class="modal-kicker">FIGURES · EXPERIMENT 01</p>
-        <h2 id="modalTitle">A different way to see.</h2>
-        <p>People become floating, confidence-driven pixels with motion echoes. Toggle Black BG to remove the scene behind them. Record up to 60 seconds of silent video or capture a still. Individual silhouettes are tracked approximately when separated.</p>
-        <p>Image processing happens on your device. Your camera and photos aren't uploaded to an app server. MediaPipe resources are fetched when you first use the effect.</p>
       </div>
-    </div>
-    <div class="modal-backdrop video-preview-modal" id="videoPreviewModal" hidden>
-      <div class="modal clip-modal" role="dialog" aria-modal="true" aria-labelledby="clipTitle">
-        <button class="modal-close" id="closeClipButton" aria-label="Close clip preview">×</button>
-        <p class="modal-kicker">FIGURES · LIVING PIXELS</p>
-        <h2 id="clipTitle">Your moving moment.</h2>
-        <video id="clipPreview" controls playsinline preload="metadata"></video>
-        <button class="primary-button save-clip" id="saveClipButton">Save video</button>
-        <p class="clip-note">Up to 60 seconds · No audio · Recorded on your device</p>
-      </div>
-    </div>
-    <input type="file" id="fileInput" accept="image/*" hidden />
-    <script type="module" src="./app.js"></script>
-  </body>
+    </section>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
 </html>
