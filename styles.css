@@ -193,3 +193,23 @@ button:focus-visible, input:focus-visible, .sv-field:focus-visible { outline: 2p
   .topbar-source { gap: 10px; }
   .import-inline { padding: 9px 10px; font-size: 10px; }
 }
+
+
+/* Export is available only for imported clips; it never captures the webcam. */
+.download-inline {
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  min-height:38px; padding:9px 13px; border:1px solid #424638;
+  border-radius:99px; background:#eff6bd; color:#202319;
+  font-size:11px; font-weight:650; letter-spacing:.01em;
+  transition:background .2s ease, transform .18s ease;
+}
+.download-inline:hover:not(:disabled) { background:#f5fc66; }
+.download-inline:active:not(:disabled) { transform:scale(.97); }
+.download-inline:disabled { opacity:.75; cursor:progress; }
+.download-inline.is-exporting { background:#d2d4c8; }
+.download-inline svg { width:16px; height:16px; flex:none; }
+@media(max-width:600px) {
+  .download-inline { padding:9px 10px; font-size:10px; }
+  .download-inline svg { width:13px; height:13px; }
+  .topbar-source { gap:7px; }
+}
