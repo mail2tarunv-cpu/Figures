@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildConfidenceTiles, tileOpacity, tileHash, findFigures, trackFigures, makeEchoPoints } from '../living-pixels.mjs';
+import { buildConfidenceTiles, stabilizeTileField, tileOpacity, tileHash, findFigures, trackFigures, makeEchoPoints } from '../living-pixels.mjs';
 
 test('confidence tiles sample the mask without hard-thresholding', () => {
   const field = new Float32Array([0,.3,.6,1]);
@@ -41,4 +41,35 @@ test('echo samples stay bounded and normalized', () => {
   const points=makeEchoPoints(new Float32Array(10000).fill(1),100,100,60);
   assert.ok(points.length<=60 && points.length>0);
   assert.ok(points.every(p=>p.x>=0&&p.x<=1&&p.y>=0&&p.y<=1));
+});
+
+test('pixel-field cleanup removes isolated segmentation specks', () => {
+  const raw = new Float32Array(25);
+  raw[12] = 0.98;
+  const cleaned = stabilizeTileField(raw, 5, 5);
+  assert.equal(cleaned[12], 0);
+});
+
+test('dense interiors and narrow legs remain continuous', () => {
+  const solid = stabilizeTileField(new Float32Array(36).fill(1), 6, 6);
+  assert.ok(solid.every(v => v > 0.98));
+
+  const limb = new Float32Array(49);
+  for (let y = 1; y < 6; y++) limb[y * 7 + 3] = 0.93;
+  const refined = stabilizeTileField(limb, 7, 7);
+  assert.ok(refined[3 * 7 + 3] > 0.7);
+});
+
+test('tile cleanup fills a small hole without washing away details', () => {
+  const raw = new Float32Array(25).fill(.96);
+  raw[12] = .25;
+  const refined = stabilizeTileField(raw, 5, 5);
+  assert.ok(refined[12] > .5);
+  assert.ok(refined.every(v => v >= 0 && v <= 1));
+});
+
+test('dense tile cores stay almost fully opaque while uncertain edges fade', () => {
+  assert.ok(tileOpacity(1, .99) > .95);
+  assert.equal(tileOpacity(.05, 0), 0);
+  assert.equal(tileOpacity(.4, .95), 0);
 });
