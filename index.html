@@ -1,63 +1,71 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#121212" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="description" content="FIGURES — people, reimagined as living pixels." />
-  <title>FIGURES — Living Pixels</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="theme-color" content="#121212"/>
+  <meta name="description" content="FIGURES is a living-pixel camera studio with 9:16 video capture."/>
+  <title>FIGURES — Pixel Studio</title>
+  <link rel="stylesheet" href="./styles.css"/>
 </head>
 <body>
-  <main class="app" aria-label="FIGURES living pixels">
-    <section class="stage" id="stage" aria-label="Live moving pixel figures">
-      <canvas id="outputCanvas" aria-label="Animated human figures on a dark background"></canvas>
-      <video id="cameraVideo" playsinline autoplay muted aria-hidden="true"></video>
-
-      <header class="topbar">
-        <div class="wordmark" aria-label="FIGURES">figures<span>.</span></div>
-        <div class="topbar-source" id="activeSource" hidden>
-          <span class="live-indicator" id="liveIndicator"><span class="live-dot"></span><span id="sourceLabel">LIVE</span></span>
-          <button class="download-inline" type="button" id="downloadVideoButton" aria-label="Download the pixelated video" hidden>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v3h16v-3"/></svg>
-            <span id="downloadVideoLabel">Download video</span>
-          </button>
-          <button class="import-inline" type="button" id="importVideoActive" aria-label="Import or replace video">Import video <span aria-hidden="true">↗</span></button>
-        </div>
-      </header>
-
-      <div class="intro" id="intro">
-        <div class="intro-content">
-          <p class="eyebrow">AN EXPERIMENT IN SEEING</p>
-          <h1>People,<br /><em>reimagined.</em></h1>
-          <p class="intro-subtitle">You are the canvas. Move, and watch your figure come alive.</p>
-          <div class="start-actions">
-            <button class="start-button" id="startButton" type="button">
-              <span>Start camera</span>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
-            </button>
-            <button class="import-button" id="importVideoButton" type="button">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 6 3-6 3V9Z"/></svg>
-              <span>Import video</span>
-            </button>
-          </div>
-          <p class="privacy-note">Processed on your device. Nothing is uploaded.</p>
-        </div>
+<main class="app" aria-label="FIGURES Pixel Studio">
+  <header class="app-header">
+    <div class="wordmark" aria-label="FIGURES">figures<span>.</span></div>
+    <span class="header-meta">A LIVING PIXEL STUDIO</span>
+  </header>
+  <div class="workspace">
+    <section class="viewer" aria-label="Portrait output">
+      <div class="capture-frame" id="stage">
+        <canvas id="outputCanvas" width="540" height="960" aria-label="9 by 16 pixel-figure preview"></canvas>
+        <video id="cameraVideo" playsinline autoplay muted aria-hidden="true"></video>
       </div>
-
+      <div class="frame-details">
+        <span>PORTRAIT <span class="frame-dim">/</span> 9:16</span>
+        <span>1080 × 1920 OUTPUT</span>
+      </div>
+    </section>
+    <aside class="studio-controls" aria-label="Camera and export controls">
+      <div class="studio-heading">
+        <div class="eyebrow">EXPERIMENT 001</div>
+        <h1>Living<br/>pixels<span>.</span></h1>
+        <p>Move, change color, and capture your figure.</p>
+      </div>
+      <div id="intro" class="source-intro">
+        <span class="source-description">CHOOSE YOUR SOURCE</span>
+      </div>
+      <div class="source-controls">
+        <button class="source-button" id="startButton" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="7" width="14" height="11" rx="2"/><path d="m16 10 6-3v11l-6-3"/></svg>
+          <span>Live camera</span>
+        </button>
+        <button class="source-button" id="importVideoButton" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m10 8 6 4-6 4V8Z"/></svg>
+          <span>Import video</span>
+        </button>
+      </div>
+      <div class="source-state" id="activeSource" hidden>
+        <span class="live-indicator" id="liveIndicator">
+          <span class="live-dot"></span><span id="sourceLabel">LIVE</span>
+        </span>
+        <button class="import-inline" id="importVideoActive" type="button" aria-label="Replace imported video" hidden>Replace video</button>
+      </div>
       <p class="camera-hint" id="cameraHint" hidden>Step into the frame</p>
-      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-
+      <div class="section-rule"></div>
       <div class="color-dock" id="colorDock" hidden>
+        <div class="control-label-row"><span>FIGURE COLOR</span><span id="colorHex">#F5FC66</span></div>
+        <button class="color-trigger" id="colorTrigger" type="button" aria-label="Adjust pixel color" aria-controls="palettePanel" aria-expanded="false">
+          <span class="color-preview" id="colorPreview"></span>
+          <span>Color</span>
+          <svg class="dock-chevron" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 14 6-6 6 6"/></svg>
+        </button>
         <div class="palette-panel" id="palettePanel" hidden>
-          <div class="palette-heading"><span>COLOR</span><span class="palette-note">DRAG TO EXPLORE</span></div>
-          <div class="sv-field" id="svField" role="slider" aria-label="Choose saturation and brightness" aria-valuetext="Drag to select a color" tabindex="0">
+          <div class="palette-heading">DRAG TO EXPLORE</div>
+          <div class="sv-field" id="svField" role="slider" tabindex="0" aria-label="Saturation and brightness" aria-valuetext="Drag to select color">
             <span class="sv-cursor" id="svCursor"></span>
           </div>
-          <input id="hueSlider" class="hue-slider" type="range" min="0" max="359" value="65" aria-label="Hue" />
-          <div class="palette-presets" role="group" aria-label="Quick colors">
+          <input id="hueSlider" class="hue-slider" type="range" min="0" max="359" value="65" aria-label="Hue"/>
+          <div class="palette-presets" role="group" aria-label="Preset figure colors">
             <button class="preset" type="button" style="--preset:#F5FC66" data-color="#F5FC66" aria-label="Acid yellow" aria-pressed="true"></button>
             <button class="preset" type="button" style="--preset:#FF765B" data-color="#FF765B" aria-label="Coral" aria-pressed="false"></button>
             <button class="preset" type="button" style="--preset:#C6A4F7" data-color="#C6A4F7" aria-label="Lavender" aria-pressed="false"></button>
@@ -65,16 +73,24 @@
             <button class="preset" type="button" style="--preset:#FFFFFF" data-color="#FFFFFF" aria-label="White" aria-pressed="false"></button>
           </div>
         </div>
-        <button class="color-trigger" id="colorTrigger" type="button" aria-label="Adjust particle color" aria-controls="palettePanel" aria-expanded="false">
-          <span class="color-preview" id="colorPreview"></span>
-          <span class="control-label">Color</span>
-          <span class="color-hex" id="colorHex">#F5FC66</span>
-          <svg class="dock-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg>
-        </button>
       </div>
-    </section>
-  </main>
-  <input type="file" id="videoFileInput" accept="video/mp4,video/quicktime,video/webm,video/x-m4v,video/*,.mp4,.mov,.m4v,.webm" hidden />
-  <script type="module" src="./app.js"></script>
+      <div class="capture-actions">
+        <button class="record-button" id="recordButton" type="button" hidden>
+          <span class="record-dot"></span><span id="recordLabel">Record</span>
+        </button>
+        <button class="download-button" id="downloadVideoButton" type="button" hidden>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v3h16v-3"/></svg>
+          <span id="downloadVideoLabel">Download video</span>
+        </button>
+        <div class="record-clock" id="recordClock" role="status" aria-live="off" hidden>00:00</div>
+        <p class="capture-note" id="captureNote">Select a source to begin.</p>
+      </div>
+      <p class="privacy-note">9:16 capture · <span>#121212</span> background<br/>Processed locally. Nothing is uploaded.</p>
+    </aside>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</main>
+<input type="file" id="videoFileInput" accept="video/mp4,video/quicktime,video/webm,video/x-m4v,video/*,.mp4,.mov,.m4v,.webm" hidden/>
+<script type="module" src="./app.js"></script>
 </body>
 </html>
