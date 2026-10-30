@@ -20,7 +20,6 @@ const elements = {
   video: document.querySelector('#cameraVideo'), intro: document.querySelector('#intro'),
   start: document.querySelector('#startButton'), cameraHint: document.querySelector('#cameraHint'),
   importStart: document.querySelector('#importVideoButton'),
-  importActive: document.querySelector('#importVideoActive'),
   downloadVideo: document.querySelector('#downloadVideoButton'),
   downloadLabel: document.querySelector('#downloadVideoLabel'),
   fileInput: document.querySelector('#videoFileInput'),
@@ -100,7 +99,6 @@ function stopSource() {
   state.importedVideoName = null;
   elements.downloadVideo.hidden = true;
   elements.recordButton.hidden = true;
-  elements.importActive.hidden = true;
   elements.captureNote.textContent = 'Select a source to begin.';
 }
 function clearMask() {
@@ -356,7 +354,6 @@ async function startCamera() {
   stopSource(); clearMask();
   elements.start.disabled = true;
   elements.importStart.disabled = true;
-  elements.importActive.disabled = true;
   elements.start.querySelector('span').textContent = 'Starting…';
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
@@ -372,7 +369,6 @@ async function startCamera() {
     state.mode = 'camera';
     elements.downloadVideo.hidden = true;
     elements.recordButton.hidden = false;
-    elements.importActive.hidden = true;
     elements.captureNote.textContent = 'Record the pixels, not the camera image.';
     elements.intro.hidden = true;
     elements.activeSource.hidden = false;
@@ -391,7 +387,6 @@ async function startCamera() {
   } finally {
     state.busy = false; elements.start.disabled = false;
     elements.importStart.disabled = false;
-    elements.importActive.disabled = false;
     elements.start.querySelector('span').textContent = 'Start camera';
   }
 }
@@ -406,7 +401,6 @@ async function loadImportedVideo(file) {
   state.busy = true;
   elements.start.disabled = true;
   elements.importStart.disabled = true;
-  elements.importActive.disabled = true;
   stopSource();
   state.mode = 'idle';
   clearMask();
@@ -441,7 +435,6 @@ async function loadImportedVideo(file) {
     elements.sourceLabel.textContent = 'VIDEO LOOP';
     elements.downloadVideo.hidden = false;
     elements.recordButton.hidden = true;
-    elements.importActive.hidden = false;
     elements.captureNote.textContent = 'Download the full clip as a portrait video.';
     elements.liveIndicator.hidden = false;
     elements.colorDock.hidden = false;
@@ -467,7 +460,6 @@ async function loadImportedVideo(file) {
     state.busy = false;
     elements.start.disabled = false;
     elements.importStart.disabled = false;
-    elements.importActive.disabled = false;
     elements.importStart.querySelector('span').textContent = 'Import video';
   }
 }
@@ -496,7 +488,6 @@ function resetLiveRecordingUI() {
   elements.recordClock.hidden = true;
   elements.start.disabled = false;
   elements.importStart.disabled = false;
-  elements.importActive.disabled = false;
   if (state.mode === 'camera') elements.captureNote.textContent = 'Record the pixels, not the camera image.';
 }
 function stopLiveRecording() {
@@ -566,7 +557,6 @@ function toggleLiveRecording() {
     elements.recordClock.hidden = false;
     elements.start.disabled = true;
     elements.importStart.disabled = true;
-    elements.importActive.disabled = true;
     elements.captureNote.textContent = 'Recording the 9:16 pixel canvas.';
     updateRecordingClock();
     liveRecording.timer = setInterval(updateRecordingClock, 160);
@@ -636,7 +626,6 @@ async function downloadConvertedVideo() {
 
   state.busy = true;
   exportSession.active = true;
-  elements.importActive.disabled = true;
   elements.importStart.disabled = true;
   elements.start.disabled = true;
   elements.downloadVideo.disabled = true;
@@ -733,7 +722,6 @@ async function downloadConvertedVideo() {
     elements.downloadLabel.textContent = 'Download video';
     elements.downloadVideo.classList.remove('is-exporting');
     elements.downloadVideo.disabled = false;
-    elements.importActive.disabled = false;
     elements.importStart.disabled = false;
     elements.start.disabled = false;
     elements.colorTrigger.disabled = false;
@@ -807,7 +795,6 @@ function bindUI() {
   elements.start.addEventListener('click',startCamera);
   const chooseVideo = () => { if (!state.busy) elements.fileInput.click(); };
   elements.importStart.addEventListener('click',chooseVideo);
-  elements.importActive.addEventListener('click',chooseVideo);
   elements.downloadVideo.addEventListener('click',downloadConvertedVideo);
   elements.recordButton.addEventListener('click',toggleLiveRecording);
   elements.fileInput.addEventListener('change',event => {
