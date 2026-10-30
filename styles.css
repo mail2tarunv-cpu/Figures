@@ -213,3 +213,15 @@ button:focus-visible, input:focus-visible, .sv-field:focus-visible { outline: 2p
   .download-inline svg { width:13px; height:13px; }
   .topbar-source { gap:7px; }
 }
+
+
+@media(max-width:600px) {
+  /* Keep the camera and export actions tappable on narrow viewports. */
+  .topbar-source #sourceLabel { display:none; }
+  .topbar-source .live-indicator { gap:0; }
+  .topbar-source .import-inline { font-size:0; padding:6px 10px; min-width:34px; min-height:36px; }
+  .topbar-source .import-inline span { font-size:17px; line-height:1; }
+  .topbar-source .download-inline { min-width:36px; min-height:36px; padding:8px; }
+  .topbar-source .download-inline span { display:none; }
+  .topbar { padding-left:20px; padding-right:20px; }
+}
