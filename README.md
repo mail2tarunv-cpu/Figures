@@ -1,44 +1,48 @@
-# FIGURES — Living Pixels
+# FIGURES — Pixel Studio
 
-A **minimal living-pixel experience**: people become floating pixel figures on a permanent **#121212** background. Use either a webcam or a local video file. Neither source's original pixels are composited into the displayed scene.
+FIGURES transforms people into living pixel figures on a permanent **#121212** background. The minimal studio separates a **fixed 9:16 portrait frame** from all controls. The browser preview and captured file are rendered from the same dedicated **1080 × 1920** canvas, so buttons, labels, and the color picker are never recorded.
 
-## Experience
+## Use
 
-1. Open [FIGURES](https://figures-delta.vercel.app). Select **Start camera** for the live webcam, or **Import video** to select a local MP4, MOV, M4V or WebM clip.
-2. The device runs MediaPipe person segmentation locally. The figure becomes floating pixels, with short motion echoes. Imported videos play in a loop and are **contained** within the dark stage instead of cropped, preserving the full actor.
-3. Use the **Color** control at the bottom to drag through saturation/brightness, scrub the hue spectrum, or choose a preset. Colors change immediately.
-4. With a video playing, click **Download video** in the top-right to export the converted clip, or **Import video** to replace it. Export runs once from the start of the source and restores playback when done. Only one source plays at a time.
+1. Open [FIGURES](https://figures-delta.vercel.app) on a MacBook or another device with a supported browser.
+2. Choose **Live camera** to request webcam permission, or **Import video** to open a local MP4, MOV, M4V, or WebM. Source switching stops the previous stream.
+3. The person becomes stable, dense pixels. Adjust **Color** with a hue slider, a draggable saturation/brightness square, or presets. The figure sits on a dark #121212 background.
+4. **Live camera:** choose **Record**, then **Stop recording**. The resulting **silent 9:16** video downloads locally. It stops automatically after **60 seconds**.
+5. **Imported video:** choose **Download video**. FIGURES processes the entire video from the beginning and downloads a silent **9:16** video, up to **2 minutes** long. Leave the tab visible throughout the export.
 
-Importing and exporting video stays **local to your device**. In imported-video mode, click **Download video** to process one complete pass and save the pixel version in the original source aspect ratio. The output is a silent MP4 or WebM depending on browser support (up to two minutes; keep the tab visible while rendering). The live webcam has no record or download control. There is no uploading to a server, photo capture, or background toggle; the stage is always #121212.
+The capture frame has no overlaid UI. Live camera video uses a centered 9:16 crop (to fill the portrait frame). Imported clips preserve their full original composition inside the 9:16 output (unused space is #121212).
 
-Mac shortcuts: **C** opens or closes the color picker, **F** enters or exits fullscreen, **Esc** closes the picker. On mobile, tap the color control. Webcam permission requires HTTPS or localhost. MP4 with H.264 is the most widely compatible format; MOV and WebM depend on browser and codec support.
+## Browser formats and privacy
 
-## Technology
+Exports use the best supported local MediaRecorder format: **MP4** when the browser provides it; otherwise **WebM**. The downloaded format is determined by browser/codec support rather than the source file extension. Audio is intentionally omitted. All camera and imported-video frames remain **on the user's device**; only the model/runtime assets are downloaded from MediaPipe-hosted infrastructure.
 
-- MediaPipe ImageSegmenter Selfie Segmenter (TensorFlow Lite model, running via the browser's WASM CPU backend).
-- Confidence-driven particles: more solid near strongly detected body regions, sparse and floating at uncertain mask edges.
-- 2D Canvas rendering on a separate animation clock; person segmentation runs at an adaptive interval.
-- Lightweight centroid-based association for separated figures, with short motion trails.
-- Five palette presets plus continuous HSV color selection (hue, saturation, brightness).
-- Camera and imported video files stay local. The required MediaPipe runtime/model download from external CDNs on first use; there is no app-server video upload.
+This is not a full offline renderer: imported clips are recorded at the browser's real-time playback speed, so slow/overloaded machines can drop rendered frames. See the limitations below.
+
+## Tech
+
+- MediaPipe ImageSegmenter (Selfie Segmenter float16 TFLite model) with browser-side CPU/WASM inference.
+- Confidence sampling, spatial cleanup, stable denser tiles, temporal confidence stabilization, and constrained living-pixel shimmer.
+- Separate segmentation and animation clocks; live and imported videos use the **same portrait output canvas**.
+- Camera video is center-cropped in 9:16; imported-video content is contained instead.
+- A canvas video track is encoded via the browser's MediaRecorder and saved locally.
 
 ## Local development
 
-```bash
+```sh
 python3 -m http.server 8000
 ```
 
-Open `http://localhost:8000`. The site is static HTML, CSS, JavaScript and .mjs modules.
+Open `http://localhost:8000`, then run tests with Node:
 
-```bash
+```sh
 node --check app.js
 node --test tests/*.test.mjs
 ```
 
-## Current limitations
+## Known limits
 
-- The selfie segmentation model has roughly 256px-native mask resolution. Fine hair, distant pedestrians and overlapping people can still fail.
-- Separate person tracking is approximate, not individual identity tracking.
-- Segmentation is CPU-bound; the renderer stays fluid between inference frames but heavier computers or high-res monitors may experience dropped frames.
-- Safari and Chrome webcam permission, imported-video decoding and inference performance vary across devices. Test an actual imported MP4 on MacBook before assessing final visual quality.
-- No LiDAR: browser implementations do not expose iPhone LiDAR depth data as a general-purpose camera API.
+- The selfie model's native segmentation resolution is far below 1080 × 1920; a higher-resolution output cannot invent exact hair/finger edges.
+- Processing and encoding are hardware- and browser-dependent. Check real exports in Chrome and Safari on an actual MacBook before relying on the final film.
+- The browser cannot guarantee exact 30-fps delivery under heavy processing. Imported files are processed as they play, rather than with frame-accurate offline transcoding.
+- Multiple overlapping people are not individually tracked reliably; a segmentation mask can merge them.
+- Camera capture requires a secure origin (HTTPS or localhost).
