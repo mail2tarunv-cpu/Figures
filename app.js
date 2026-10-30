@@ -1,15 +1,16 @@
 /** FIGURES — one living-pixel view, with a fixed #121212 background. */
 import { extractPersonMask } from './person-mask.mjs';
 import { refineConfidence } from './mask-refinement.mjs';
-import { buildConfidenceTiles, tileOpacity, tileHash, findFigures, trackFigures, makeEchoPoints } from './living-pixels.mjs';
+import { buildConfidenceTiles, stabilizeTileField, tileOpacity, tileHash, findFigures, trackFigures, makeEchoPoints } from './living-pixels.mjs';
 
 
 const PACKAGE_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.1';
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
 const STAGE_COLOR = '#121212';
 const MAX_LIVE_ANALYSIS_SIDE = 640;
+const MAX_IMPORTED_ANALYSIS_SIDE = 960;
 const MIN_ANALYSIS_INTERVAL_MS = 70;
-const ECHO_LIFETIME_MS = 950;
+const ECHO_LIFETIME_MS = 700;
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const elements = {
   canvas: document.querySelector('#outputCanvas'), stage: document.querySelector('#stage'),
@@ -104,9 +105,9 @@ function mixChannel(a, b, amount) {
 function buildPixelPalette() {
   const base = hexRgb(state.color);
   return {
-    light: base.map(v => mixChannel(v, 255, 0.24)),
+    light: base.map(v => mixChannel(v, 255, 0.12)),
     base,
-    shadow: base.map(v => mixChannel(v, 0, 0.18)),
+    shadow: base.map(v => mixChannel(v, 0, 0.10)),
   };
 }
 
@@ -142,21 +143,26 @@ function drawFrame() {
   ctx.restore();
 }
 function getPixelOccupancy(width, height, crop) {
-  const cell = Math.max(12, Math.round(Math.min(width, height) / 38));
+  // Imported footage is framed small on desktop; use finer, denser pixels to
+  // preserve a readable face, arms, legs and the actor's physical performance.
+  const detail = state.mode === 'video' ? 76 : 64;
+  const minimum = state.mode === 'video' ? 5 : 7;
+  const cell = Math.max(minimum, Math.round(Math.min(width, height) / detail));
   const cols = Math.ceil(width / cell), rows = Math.ceil(height / cell);
   const key = `${maskRevision}:${width}:${height}:${cell}:${crop.mx.toFixed(3)}:${crop.my.toFixed(3)}:${crop.mw.toFixed(3)}:${crop.mh.toFixed(3)}`;
   if (occupancyCache?.key === key) return occupancyCache;
   const previous = occupancyCache;
-  const field = buildConfidenceTiles(state.confidence, state.maskWidth, state.maskHeight, cols, rows, crop);
-  const components = findFigures(field, cols, rows, .46, 5);
+  const rawField = buildConfidenceTiles(state.confidence, state.maskWidth, state.maskHeight, cols, rows, crop);
+  const field = stabilizeTileField(rawField, cols, rows);
+  const components = findFigures(field, cols, rows, .44, 7);
   const now = performance.now();
   const tracked = trackFigures(state.mode !== 'idle' ? state.tracks : [], components, state.nextTrackId, now);
   const identities = new Int32Array(cols * rows);
   for (const [index, id] of tracked.idsByCell) identities[index] = id;
   if (state.mode !== 'idle') {
     // Capture only actual movement, not an echo of an unmoving figure.
-    if (previous && previous.width === width && previous.height === height &&
-        tracked.movement > .008 && now - state.lastEchoAt > 135 && !(reducedMotion?.matches)) {
+    if (state.mode === 'camera' && previous && previous.width === width && previous.height === height &&
+        tracked.movement > .008 && now - state.lastEchoAt > 150 && !(reducedMotion?.matches)) {
       const points = makeEchoPoints(previous.field, previous.cols, previous.rows, 125);
       if (points.length) state.echoes.push({ points, capturedAt: now, cell: previous.cell });
       state.echoes = state.echoes.slice(-7);
@@ -180,12 +186,12 @@ function renderPixelOverlay(width, height, crop, timeMs) {
   const seconds = (motionless ? 0 : timeMs) * .001;
   const now = performance.now();
   // Independent of model inference cadence: an echo remains behind and fades.
-  if (state.mode !== 'idle' && !motionless) {
+  if (state.mode === 'camera' && !motionless) {
     state.echoes = state.echoes.filter(e => now - e.capturedAt < ECHO_LIFETIME_MS);
     overlayCtx.fillStyle = colors[0];
     for (const echo of state.echoes) {
       const age = (now - echo.capturedAt) / ECHO_LIFETIME_MS;
-      const alpha = (1 - age) ** 1.6 * .27;
+      const alpha = (1 - age) ** 1.6 * .12;
       const step = Math.max(3, echo.cell * (.34 + age * .10));
       overlayCtx.globalAlpha = alpha;
       for (const p of echo.points) {
@@ -196,7 +202,8 @@ function renderPixelOverlay(width, height, crop, timeMs) {
     }
   }
   let prevColor = '';
-  const gap = Math.max(1, Math.round(cell * .09));
+  // One consistent, small negative space keeps the silhouette cohesive.
+  const gap = Math.max(1, Math.round(cell * .08));
   for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
     const i = y * cols + x, c = field[i];
     const hash = tileHash(x, y);
@@ -209,14 +216,21 @@ function renderPixelOverlay(width, height, crop, timeMs) {
     const wave = Math.sin(phase) + .24 * Math.cos(y * .41 - seconds * .58);
     const tone = wave > .56 ? 0 : wave < -.66 ? 2 : 1;
     if (prevColor !== colors[tone]) { overlayCtx.fillStyle = colors[tone]; prevColor = colors[tone]; }
-    const edge = c < .72;
-    const pixelSize = Math.max(3, Math.round((cell - gap) * (edge ? .56 + .24 * c : .96)));
-    const floating = motionless ? 0 : 1;
-    const xDrift = floating * (Math.sin(seconds * .78 + y * .29 + hash * 6) * cell * .14 + seconds % 2 * cell * .015);
-    const yDrift = floating * Math.cos(seconds * .62 + x * .35 + hash * 4) * cell * .15;
+    // Solid core, softer articulated edges. Small, coherent motion preserves
+    // the human performance instead of making every tile swim independently.
+    const sizeFraction = c >= .74 ? .96 : c >= .50 ? .84 : (.58 + c * .38);
+    const pixelSize = Math.max(2, Math.round((cell - gap) * sizeFraction));
     const inset = (cell - pixelSize) / 2;
+    const bodyX = motionless ? 0 : Math.sin(seconds * .72 + id * .67) * cell * .025;
+    const bodyY = motionless ? 0 : Math.cos(seconds * .64 + id * .59) * cell * .025;
+    const microX = motionless ? 0 : Math.sin(seconds * .45 + x * .18 + hash * 4) * cell * .035;
+    const microY = motionless ? 0 : Math.cos(seconds * .42 + y * .16 + hash * 3.2) * cell * .035;
     overlayCtx.globalAlpha = opacity;
-    overlayCtx.fillRect(Math.round(x * cell + inset + xDrift), Math.round(y * cell + inset + yDrift), pixelSize, pixelSize);
+    overlayCtx.fillRect(
+      Math.round(x * cell + inset + bodyX + microX),
+      Math.round(y * cell + inset + bodyY + microY),
+      pixelSize, pixelSize
+    );
   }
   overlayCtx.globalAlpha = 1;
 }
@@ -261,7 +275,11 @@ async function loadModel() {
 
 
 function analyzeSource() {
-  const scale = Math.min(1, MAX_LIVE_ANALYSIS_SIDE / Math.max(state.mediaWidth, state.mediaHeight));
+  // More source detail for uploaded clips, while leaving realtime webcam
+  // inference capped for responsiveness. The model's native resolution still
+  // limits fine edges; this avoids adding premature downsampling artifacts.
+  const maxSide = state.mode === 'video' ? MAX_IMPORTED_ANALYSIS_SIDE : MAX_LIVE_ANALYSIS_SIDE;
+  const scale = Math.min(1, maxSide / Math.max(state.mediaWidth, state.mediaHeight));
   const w = Math.max(2, Math.round(state.mediaWidth * scale));
   const h = Math.max(2, Math.round(state.mediaHeight * scale));
   if (analysisCanvas.width !== w) analysisCanvas.width = w;
