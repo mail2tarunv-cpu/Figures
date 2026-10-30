@@ -534,7 +534,7 @@ async function downloadConvertedVideo() {
     state.lastTimestamp = timestamp;
     state.lastVideoTime = video.currentTime;
     state.lastInferAt = performance.now();
-    const renderExportFrame = now => {
+    const paintExportFrame = now => {
       outputCtx.fillStyle = STAGE_COLOR;
       outputCtx.fillRect(0, 0, w, h);
       if (state.hasMask && state.maskWidth && state.maskHeight) {
@@ -543,6 +543,9 @@ async function downloadConvertedVideo() {
         }, now);
         outputCtx.drawImage(overlayCanvas, 0, 0, w, h);
       }
+    };
+    const renderExportFrame = now => {
+      paintExportFrame(now);
       frameHandle = requestAnimationFrame(renderExportFrame);
     };
     renderExportFrame(performance.now());
@@ -576,7 +579,7 @@ async function downloadConvertedVideo() {
         const stamp = Math.max(Math.floor(performance.now()), state.lastTimestamp + 1);
         state.model.segmentForVideo(analysisCanvas, stamp, applySegmentation);
         state.lastTimestamp = stamp;
-        renderExportFrame(performance.now());
+        paintExportFrame(performance.now());
       } catch (error) { console.warn('Final export frame unavailable:', error); }
       endedTimer = setTimeout(() => {
         if (recorder.state !== 'inactive') recorder.stop();
