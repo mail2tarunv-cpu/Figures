@@ -7,6 +7,9 @@ import { buildConfidenceTiles, stabilizeTileField, tileOpacity, tileHash, findFi
 const PACKAGE_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.1';
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
 const STAGE_COLOR = '#121212';
+const CAPTURE_WIDTH = 1080;
+const CAPTURE_HEIGHT = 1920;
+const MAX_RECORD_MS = 60000;
 const MAX_LIVE_ANALYSIS_SIDE = 640;
 const MAX_IMPORTED_ANALYSIS_SIDE = 960;
 const MIN_ANALYSIS_INTERVAL_MS = 70;
@@ -28,9 +31,18 @@ const elements = {
   palette: document.querySelector('#palettePanel'), colorPreview: document.querySelector('#colorPreview'),
   colorHex: document.querySelector('#colorHex'), svField: document.querySelector('#svField'),
   svCursor: document.querySelector('#svCursor'), hueSlider: document.querySelector('#hueSlider'),
+  recordButton: document.querySelector('#recordButton'),
+  recordLabel: document.querySelector('#recordLabel'),
+  recordClock: document.querySelector('#recordClock'),
+  captureNote: document.querySelector('#captureNote'),
   presets: document.querySelectorAll('.preset')
 };
-const ctx = elements.canvas.getContext('2d', { alpha: false });
+// A fixed 9:16 recording surface, independent from its scaled preview.
+const captureCanvas = document.createElement('canvas');
+captureCanvas.width = CAPTURE_WIDTH;
+captureCanvas.height = CAPTURE_HEIGHT;
+const ctx = captureCanvas.getContext('2d', { alpha: false });
+const previewCtx = elements.canvas.getContext('2d', { alpha: false });
 const analysisCanvas = document.createElement('canvas');
 const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
 const overlayCanvas = document.createElement('canvas');
@@ -47,6 +59,7 @@ const state = {
 };
 const picker = { h: 65, s: 0.6, v: 0.99, open: false };
 const exportSession = { active: false, abort: null };
+const liveRecording = { recorder: null, stream: null, chunks: [], started: 0, timer: null, maxTimer: null, mime: null };
 function notify(message, duration = 4000) {
   clearTimeout(toastTimeout);
   elements.toast.textContent = message;
@@ -54,18 +67,25 @@ function notify(message, duration = 4000) {
   toastTimeout = setTimeout(() => { elements.toast.hidden = true; }, duration);
 }
 function syncCanvasResolution() {
+  // The browser preview may resize; captured pixels always remain 1080 x 1920.
   const bounds = elements.stage.getBoundingClientRect();
   if (!bounds.width || !bounds.height) return;
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
-  const factor = Math.min(1, 1920 / Math.max(bounds.width * ratio, bounds.height * ratio));
-  const w = Math.max(2, Math.round(bounds.width * ratio * factor));
-  const h = Math.max(2, Math.round(bounds.height * ratio * factor));
+  const w = Math.max(2, Math.round(bounds.width * ratio));
+  const h = Math.max(2, Math.round(w * 16 / 9));
   if (elements.canvas.width !== w || elements.canvas.height !== h) {
     elements.canvas.width = w; elements.canvas.height = h;
-    maskRevision++; occupancyCache = null; drawFrame();
+    previewCtx.imageSmoothingEnabled = true;
+    previewCtx.imageSmoothingQuality = 'high';
   }
+  drawFrame();
+}
+function refreshPreview() {
+  if (!elements.canvas.width || !elements.canvas.height) return;
+  previewCtx.drawImage(captureCanvas, 0, 0, elements.canvas.width, elements.canvas.height);
 }
 function stopSource() {
+  if (liveRecording.recorder?.state === 'recording') stopLiveRecording();
   if (exportSession.active) exportSession.abort?.(new Error('Source closed during export.'));
   if (state.animationHandle !== null) cancelAnimationFrame(state.animationHandle);
   state.animationHandle = null;
@@ -79,6 +99,9 @@ function stopSource() {
   state.importedVideoUrl = null;
   state.importedVideoName = null;
   elements.downloadVideo.hidden = true;
+  elements.recordButton.hidden = true;
+  elements.importActive.hidden = true;
+  elements.captureNote.textContent = 'Select a source to begin.';
 }
 function clearMask() {
   state.confidence = null; state.previousConfidence = null;
@@ -119,7 +142,7 @@ function buildPixelPalette() {
 
 
 function drawFrame() {
-  const w = elements.canvas.width, h = elements.canvas.height;
+  const w = CAPTURE_WIDTH, h = CAPTURE_HEIGHT;
   if (!w || !h) return;
   ctx.save();
   ctx.fillStyle = STAGE_COLOR; ctx.fillRect(0, 0, w, h);
@@ -147,6 +170,7 @@ function drawFrame() {
     }
   }
   ctx.restore();
+  refreshPreview();
 }
 function getPixelOccupancy(width, height, crop) {
   // Imported footage is framed small on desktop; use finer, denser pixels to
@@ -347,6 +371,9 @@ async function startCamera() {
     await loadModel();
     state.mode = 'camera';
     elements.downloadVideo.hidden = true;
+    elements.recordButton.hidden = false;
+    elements.importActive.hidden = true;
+    elements.captureNote.textContent = 'Record the pixels, not the camera image.';
     elements.intro.hidden = true;
     elements.activeSource.hidden = false;
     elements.sourceLabel.textContent = 'LIVE';
@@ -413,6 +440,9 @@ async function loadImportedVideo(file) {
     elements.activeSource.hidden = false;
     elements.sourceLabel.textContent = 'VIDEO LOOP';
     elements.downloadVideo.hidden = false;
+    elements.recordButton.hidden = true;
+    elements.importActive.hidden = false;
+    elements.captureNote.textContent = 'Download the full clip as a portrait video.';
     elements.liveIndicator.hidden = false;
     elements.colorDock.hidden = false;
     elements.cameraHint.hidden = true;
