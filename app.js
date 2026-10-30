@@ -18,6 +18,8 @@ const elements = {
   start: document.querySelector('#startButton'), cameraHint: document.querySelector('#cameraHint'),
   importStart: document.querySelector('#importVideoButton'),
   importActive: document.querySelector('#importVideoActive'),
+  downloadVideo: document.querySelector('#downloadVideoButton'),
+  downloadLabel: document.querySelector('#downloadVideoLabel'),
   fileInput: document.querySelector('#videoFileInput'),
   activeSource: document.querySelector('#activeSource'),
   sourceLabel: document.querySelector('#sourceLabel'),
@@ -36,7 +38,7 @@ const overlayCtx = overlayCanvas.getContext('2d', { alpha: true });
 let maskRevision = 0, occupancyCache = null, toastTimeout = null;
 const state = {
   mode: 'idle', facing: 'user', color: '#F5FC66',
-  importedVideoUrl: null,
+  importedVideoUrl: null, importedVideoName: null,
   stream: null, mediaWidth: 0, mediaHeight: 0, model: null, modelPromise: null, modelMode: null,
   confidence: null, previousConfidence: null, maskWidth: 0, maskHeight: 0, hasMask: false,
   animationHandle: null, lastInferAt: 0, lastRenderAt: 0, analysisIntervalMs: 88,
@@ -44,6 +46,7 @@ const state = {
   tracks: [], nextTrackId: 1, echoes: [], lastEchoAt: 0
 };
 const picker = { h: 65, s: 0.6, v: 0.99, open: false };
+const exportSession = { active: false, abort: null };
 function notify(message, duration = 4000) {
   clearTimeout(toastTimeout);
   elements.toast.textContent = message;
@@ -63,6 +66,7 @@ function syncCanvasResolution() {
   }
 }
 function stopSource() {
+  if (exportSession.active) exportSession.abort?.(new Error('Source closed during export.'));
   if (state.animationHandle !== null) cancelAnimationFrame(state.animationHandle);
   state.animationHandle = null;
   state.stream?.getTracks().forEach(track => track.stop());
@@ -73,6 +77,8 @@ function stopSource() {
   elements.video.load();
   if (state.importedVideoUrl) URL.revokeObjectURL(state.importedVideoUrl);
   state.importedVideoUrl = null;
+  state.importedVideoName = null;
+  elements.downloadVideo.hidden = true;
 }
 function clearMask() {
   state.confidence = null; state.previousConfidence = null;
@@ -295,7 +301,7 @@ function tick(now) {
       state.lastVideoTime = -1;
       state.lastInferAt = 0;
     }
-    if (now - state.lastRenderAt >= 30) { drawFrame(); state.lastRenderAt = now; }
+    if (!exportSession.active && now - state.lastRenderAt >= 30) { drawFrame(); state.lastRenderAt = now; }
     if (state.model && state.modelMode === 'VIDEO' && !document.hidden &&
         now - state.lastInferAt >= state.analysisIntervalMs &&
         elements.video.currentTime !== state.lastVideoTime) {
@@ -340,6 +346,7 @@ async function startCamera() {
     elements.start.querySelector('span').textContent = 'Loading vision…';
     await loadModel();
     state.mode = 'camera';
+    elements.downloadVideo.hidden = true;
     elements.intro.hidden = true;
     elements.activeSource.hidden = false;
     elements.sourceLabel.textContent = 'LIVE';
@@ -385,6 +392,7 @@ async function loadImportedVideo(file) {
   try {
     // File stays on this device. No uploads; the browser decodes it locally.
     state.importedVideoUrl = URL.createObjectURL(file);
+    state.importedVideoName = file.name;
     elements.video.loop = true;
     elements.video.muted = true;
     elements.video.playsInline = true;
@@ -404,6 +412,7 @@ async function loadImportedVideo(file) {
     elements.intro.hidden = true;
     elements.activeSource.hidden = false;
     elements.sourceLabel.textContent = 'VIDEO LOOP';
+    elements.downloadVideo.hidden = false;
     elements.liveIndicator.hidden = false;
     elements.colorDock.hidden = false;
     elements.cameraHint.hidden = true;
@@ -432,6 +441,196 @@ async function loadImportedVideo(file) {
     elements.importStart.querySelector('span').textContent = 'Import video';
   }
 }
+
+// Convert exactly one complete imported clip. The output canvas matches the
+// SOURCE ASPECT RATIO, not the MacBook viewport, so portrait videos export
+// without unwanted landscape letterboxing or UI controls.
+function chooseExportMimeType() {
+  if (!window.MediaRecorder || typeof window.MediaRecorder.isTypeSupported !== 'function') return '';
+  const formats = [
+    'video/mp4;codecs=avc1.42E01E', 'video/mp4',
+    'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'
+  ];
+  return formats.find(type => window.MediaRecorder.isTypeSupported(type)) || '';
+}
+async function seekToBeginning(video) {
+  video.pause();
+  if (video.currentTime <= .02) { video.currentTime = 0; return; }
+  await new Promise((resolve, reject) => {
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      video.removeEventListener('seeked', onSeek);
+      video.removeEventListener('error', onError);
+    };
+    const onSeek = () => { cleanup(); resolve(); };
+    const onError = () => { cleanup(); reject(new Error('Could not seek the video.')); };
+    video.addEventListener('seeked', onSeek);
+    video.addEventListener('error', onError);
+    timer = setTimeout(() => { cleanup(); reject(new Error('Video seek timed out.')); }, 5000);
+    try { video.currentTime = 0; } catch (err) { cleanup(); reject(err); }
+  });
+}
+function saveConvertedBlob(blob, mime) {
+  const extension = mime.includes('mp4') ? 'mp4' : 'webm';
+  const stem = (state.importedVideoName || 'figures-video')
+    .replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 96) || 'figures-video';
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = `${stem}-figures.${extension}`;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+async function downloadConvertedVideo() {
+  if (state.busy || state.mode !== 'video' || !state.importedVideoUrl) return;
+  const mime = chooseExportMimeType();
+  if (!mime || typeof elements.canvas.captureStream !== 'function') {
+    notify('Video export is unavailable in this browser. Try Chrome or Safari on Mac.', 6000);
+    return;
+  }
+  const video = elements.video;
+  if (!Number.isFinite(video.duration) || video.duration <= 0 || video.duration > 120) {
+    notify('Export supports imported clips up to two minutes long.', 6000);
+    return;
+  }
+  const before = { time: video.currentTime, loop: video.loop, rate: video.playbackRate };
+  const ratio = Math.min(1, 1440 / Math.max(state.mediaWidth, state.mediaHeight));
+  const w = Math.max(2, Math.round(state.mediaWidth * ratio));
+  const h = Math.max(2, Math.round(state.mediaHeight * ratio));
+  const output = document.createElement('canvas');
+  output.width = w;
+  output.height = h;
+  const outputCtx = output.getContext('2d', { alpha: false });
+  if (!outputCtx || typeof output.captureStream !== 'function') {
+    notify('Canvas video export is not supported here.', 6000);
+    return;
+  }
+
+  state.busy = true;
+  exportSession.active = true;
+  elements.importActive.disabled = true;
+  elements.importStart.disabled = true;
+  elements.downloadVideo.disabled = true;
+  elements.colorTrigger.disabled = true;
+  togglePicker(false);
+  elements.downloadVideo.classList.add('is-exporting');
+  let stream = null, recorder = null, frameHandle = null, progressTimer = null, endedTimer = null;
+  try {
+    video.loop = false;
+    video.playbackRate = 1;
+    await seekToBeginning(video);
+    clearMask(); // New run, no stale silhouette or trails at the loop seam.
+    state.lastInferAt = 0;
+    state.lastVideoTime = -1;
+    if (!state.model || state.modelMode !== 'VIDEO') await loadModel();
+    // Seed the first pixel frame BEFORE starting MediaRecorder.
+    analyzeSource();
+    const timestamp = Math.max(Math.floor(performance.now()), state.lastTimestamp + 1);
+    state.model.segmentForVideo(analysisCanvas, timestamp, applySegmentation);
+    state.lastTimestamp = timestamp;
+    state.lastVideoTime = video.currentTime;
+    state.lastInferAt = performance.now();
+    const renderExportFrame = now => {
+      outputCtx.fillStyle = STAGE_COLOR;
+      outputCtx.fillRect(0, 0, w, h);
+      if (state.hasMask && state.maskWidth && state.maskHeight) {
+        renderPixelOverlay(w, h, {
+          mx: 0, my: 0, mw: state.maskWidth, mh: state.maskHeight
+        }, now);
+        outputCtx.drawImage(overlayCanvas, 0, 0, w, h);
+      }
+      frameHandle = requestAnimationFrame(renderExportFrame);
+    };
+    renderExportFrame(performance.now());
+    stream = output.captureStream(30);
+    if (!stream.getVideoTracks().length) throw new Error('No canvas video track available.');
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6000000 });
+    const chunks = [];
+    const finished = new Promise((resolve, reject) => {
+      let settled = false;
+      const fail = error => {
+        if (settled) return;
+        settled = true;
+        reject(error instanceof Error ? error : new Error('Export interrupted.'));
+      };
+      recorder.ondataavailable = event => {
+        if (event.data?.size) chunks.push(event.data);
+      };
+      recorder.onerror = event => fail(event.error || new Error('Video encoder failed.'));
+      recorder.onstop = () => {
+        if (settled) return;
+        settled = true;
+        if (!chunks.length) { reject(new Error('The encoder returned no video data.')); return; }
+        resolve(new Blob(chunks, { type: recorder.mimeType || mime }));
+      };
+      exportSession.abort = fail;
+    });
+    const onEnded = () => {
+      // Capture the final pose, then allow the canvas stream to emit it.
+      try {
+        analyzeSource();
+        const stamp = Math.max(Math.floor(performance.now()), state.lastTimestamp + 1);
+        state.model.segmentForVideo(analysisCanvas, stamp, applySegmentation);
+        state.lastTimestamp = stamp;
+        renderExportFrame(performance.now());
+      } catch (error) { console.warn('Final export frame unavailable:', error); }
+      endedTimer = setTimeout(() => {
+        if (recorder.state !== 'inactive') recorder.stop();
+      }, 100);
+    };
+    video.addEventListener('ended', onEnded, { once: true });
+    progressTimer = setInterval(() => {
+      const progress = Math.min(99, Math.floor(video.currentTime / video.duration * 100));
+      elements.downloadLabel.textContent = `Rendering ${progress}%`;
+    }, 180);
+    elements.downloadLabel.textContent = 'Rendering 0%';
+    recorder.start(500);
+    // Playback starts alongside encoding. Export duration follows source time.
+    video.play().catch(error => exportSession.abort?.(error));
+    let blob;
+    try { blob = await finished; }
+    finally { video.removeEventListener('ended', onEnded); }
+    if (blob.size < 100) throw new Error('Generated video was empty.');
+    const actualType = blob.type || recorder.mimeType || mime;
+    saveConvertedBlob(blob, actualType);
+    notify(`Pixel video downloaded as ${actualType.includes('mp4') ? 'MP4' : 'WebM'}.`, 4800);
+  } catch (error) {
+    console.error('FIGURES export failed:', error);
+    notify(error?.message || 'Video export failed. Try another browser.', 6500);
+  } finally {
+    exportSession.active = false;
+    exportSession.abort = null;
+    clearInterval(progressTimer);
+    clearTimeout(endedTimer);
+    if (frameHandle !== null) cancelAnimationFrame(frameHandle);
+    if (recorder && recorder.state !== 'inactive') {
+      try { recorder.stop(); } catch (_) { /* already stopped */ }
+    }
+    stream?.getTracks().forEach(track => track.stop());
+    elements.downloadLabel.textContent = 'Download video';
+    elements.downloadVideo.classList.remove('is-exporting');
+    elements.downloadVideo.disabled = false;
+    elements.importActive.disabled = false;
+    elements.importStart.disabled = false;
+    elements.colorTrigger.disabled = false;
+    state.busy = false;
+    if (state.mode === 'video' && state.importedVideoUrl) {
+      video.loop = before.loop;
+      video.playbackRate = before.rate;
+      try { video.currentTime = Math.min(before.time, video.duration || before.time); }
+      catch (error) { console.warn('Could not restore clip position:', error); }
+      state.lastVideoTime = -1;
+      state.lastInferAt = 0;
+      video.play().catch(() => {});
+      drawFrame();
+    }
+  }
+}
+
 function hsvToHex(h,s,v) {
   const f = n => {
     const k = (n + h / 60) % 6;
@@ -489,6 +688,7 @@ function bindUI() {
   const chooseVideo = () => { if (!state.busy) elements.fileInput.click(); };
   elements.importStart.addEventListener('click',chooseVideo);
   elements.importActive.addEventListener('click',chooseVideo);
+  elements.downloadVideo.addEventListener('click',downloadConvertedVideo);
   elements.fileInput.addEventListener('change',event => {
     void loadImportedVideo(event.target.files?.[0]);
   });
@@ -532,7 +732,8 @@ function bindUI() {
     if (state.mode === 'video') { clearMask(); state.lastVideoTime = -1; state.lastInferAt = 0; }
   });
   document.addEventListener('visibilitychange',()=>{
-    if(!document.hidden)state.lastInferAt=0;
+    if(document.hidden && exportSession.active) exportSession.abort?.(new Error('Keep the tab visible while exporting video.'));
+    if(!document.hidden) state.lastInferAt=0;
   });
 }
 bindUI();setColor(state.color);syncCanvasResolution();
