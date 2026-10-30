@@ -15,6 +15,11 @@ const elements = {
   canvas: document.querySelector('#outputCanvas'), stage: document.querySelector('#stage'),
   video: document.querySelector('#cameraVideo'), intro: document.querySelector('#intro'),
   start: document.querySelector('#startButton'), cameraHint: document.querySelector('#cameraHint'),
+  importStart: document.querySelector('#importVideoButton'),
+  importActive: document.querySelector('#importVideoActive'),
+  fileInput: document.querySelector('#videoFileInput'),
+  activeSource: document.querySelector('#activeSource'),
+  sourceLabel: document.querySelector('#sourceLabel'),
   liveIndicator: document.querySelector('#liveIndicator'), toast: document.querySelector('#toast'),
   colorDock: document.querySelector('#colorDock'), colorTrigger: document.querySelector('#colorTrigger'),
   palette: document.querySelector('#palettePanel'), colorPreview: document.querySelector('#colorPreview'),
@@ -30,6 +35,7 @@ const overlayCtx = overlayCanvas.getContext('2d', { alpha: true });
 let maskRevision = 0, occupancyCache = null, toastTimeout = null;
 const state = {
   mode: 'idle', facing: 'user', color: '#F5FC66',
+  importedVideoUrl: null,
   stream: null, mediaWidth: 0, mediaHeight: 0, model: null, modelPromise: null, modelMode: null,
   confidence: null, previousConfidence: null, maskWidth: 0, maskHeight: 0, hasMask: false,
   animationHandle: null, lastInferAt: 0, lastRenderAt: 0, analysisIntervalMs: 88,
@@ -55,13 +61,17 @@ function syncCanvasResolution() {
     maskRevision++; occupancyCache = null; drawFrame();
   }
 }
-function stopCamera() {
+function stopSource() {
   if (state.animationHandle !== null) cancelAnimationFrame(state.animationHandle);
   state.animationHandle = null;
   state.stream?.getTracks().forEach(track => track.stop());
   state.stream = null;
   elements.video.pause();
   elements.video.srcObject = null;
+  elements.video.removeAttribute('src');
+  elements.video.load();
+  if (state.importedVideoUrl) URL.revokeObjectURL(state.importedVideoUrl);
+  state.importedVideoUrl = null;
 }
 function clearMask() {
   state.confidence = null; state.previousConfidence = null;
@@ -107,15 +117,27 @@ function drawFrame() {
   ctx.save();
   ctx.fillStyle = STAGE_COLOR; ctx.fillRect(0, 0, w, h);
   if (state.hasMask && state.mediaWidth && state.mediaHeight) {
-    const { x, y, width, height } = getCrop(state.mediaWidth, state.mediaHeight, w, h);
-    if (state.facing === 'user') { ctx.translate(w, 0); ctx.scale(-1, 1); }
-    renderPixelOverlay(w, h, {
-      mx: x / state.mediaWidth * state.maskWidth,
-      my: y / state.mediaHeight * state.maskHeight,
-      mw: width / state.mediaWidth * state.maskWidth,
-      mh: height / state.mediaHeight * state.maskHeight
-    }, performance.now());
-    ctx.drawImage(overlayCanvas, 0, 0, w, h);
+    if (state.mode === 'video') {
+      // Contain the whole imported shot instead of cropping a portrait actor
+      // to the browser viewport. Everything outside the actor stays #121212.
+      const scale = Math.min(w / state.mediaWidth, h / state.mediaHeight);
+      const dw = Math.max(1, Math.round(state.mediaWidth * scale));
+      const dh = Math.max(1, Math.round(state.mediaHeight * scale));
+      renderPixelOverlay(dw, dh, {
+        mx: 0, my: 0, mw: state.maskWidth, mh: state.maskHeight
+      }, performance.now());
+      ctx.drawImage(overlayCanvas, Math.round((w - dw) / 2), Math.round((h - dh) / 2), dw, dh);
+    } else {
+      const { x, y, width, height } = getCrop(state.mediaWidth, state.mediaHeight, w, h);
+      if (state.facing === 'user') { ctx.translate(w, 0); ctx.scale(-1, 1); }
+      renderPixelOverlay(w, h, {
+        mx: x / state.mediaWidth * state.maskWidth,
+        my: y / state.mediaHeight * state.maskHeight,
+        mw: width / state.mediaWidth * state.maskWidth,
+        mh: height / state.mediaHeight * state.maskHeight
+      }, performance.now());
+      ctx.drawImage(overlayCanvas, 0, 0, w, h);
+    }
   }
   ctx.restore();
 }
@@ -128,10 +150,10 @@ function getPixelOccupancy(width, height, crop) {
   const field = buildConfidenceTiles(state.confidence, state.maskWidth, state.maskHeight, cols, rows, crop);
   const components = findFigures(field, cols, rows, .46, 5);
   const now = performance.now();
-  const tracked = trackFigures(state.mode === 'camera' ? state.tracks : [], components, state.nextTrackId, now);
+  const tracked = trackFigures(state.mode !== 'idle' ? state.tracks : [], components, state.nextTrackId, now);
   const identities = new Int32Array(cols * rows);
   for (const [index, id] of tracked.idsByCell) identities[index] = id;
-  if (state.mode === 'camera') {
+  if (state.mode !== 'idle') {
     // Capture only actual movement, not an echo of an unmoving figure.
     if (previous && previous.width === width && previous.height === height &&
         tracked.movement > .008 && now - state.lastEchoAt > 135 && !(reducedMotion?.matches)) {
@@ -158,7 +180,7 @@ function renderPixelOverlay(width, height, crop, timeMs) {
   const seconds = (motionless ? 0 : timeMs) * .001;
   const now = performance.now();
   // Independent of model inference cadence: an echo remains behind and fades.
-  if (state.mode === 'camera' && !motionless) {
+  if (state.mode !== 'idle' && !motionless) {
     state.echoes = state.echoes.filter(e => now - e.capturedAt < ECHO_LIFETIME_MS);
     overlayCtx.fillStyle = colors[0];
     for (const echo of state.echoes) {
@@ -247,8 +269,14 @@ function analyzeSource() {
   analysisCtx.drawImage(elements.video, 0, 0, w, h);
 }
 function tick(now) {
-  if (state.mode !== 'camera') return;
+  if (state.mode !== 'camera' && state.mode !== 'video') return;
   if (elements.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    // Imported clips loop; discard stale segmentation/trails at the seam.
+    if (state.mode === 'video' && elements.video.currentTime < state.lastVideoTime - .08) {
+      clearMask();
+      state.lastVideoTime = -1;
+      state.lastInferAt = 0;
+    }
     if (now - state.lastRenderAt >= 30) { drawFrame(); state.lastRenderAt = now; }
     if (state.model && state.modelMode === 'VIDEO' && !document.hidden &&
         now - state.lastInferAt >= state.analysisIntervalMs &&
@@ -276,7 +304,12 @@ async function startCamera() {
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
     notify('Camera requires HTTPS or localhost.'); return;
   }
-  state.busy = true; elements.start.disabled = true; elements.start.textContent = 'Starting…';
+  state.busy = true;
+  stopSource(); clearMask();
+  elements.start.disabled = true;
+  elements.importStart.disabled = true;
+  elements.importActive.disabled = true;
+  elements.start.querySelector('span').textContent = 'Starting…';
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -286,22 +319,99 @@ async function startCamera() {
     await elements.video.play();
     state.mediaWidth = elements.video.videoWidth; state.mediaHeight = elements.video.videoHeight;
     if (!state.mediaWidth || !state.mediaHeight) throw new Error('No camera frames');
-    elements.start.textContent = 'Loading vision…';
+    elements.start.querySelector('span').textContent = 'Loading vision…';
     await loadModel();
     state.mode = 'camera';
     elements.intro.hidden = true;
-    elements.liveIndicator.hidden = false; elements.colorDock.hidden = false;
+    elements.activeSource.hidden = false;
+    elements.sourceLabel.textContent = 'LIVE';
+    elements.liveIndicator.hidden = false;
+    elements.colorDock.hidden = false;
     elements.cameraHint.hidden = false;
     state.lastInferAt = 0; state.lastRenderAt = 0; state.lastVideoTime = -1;
     state.lastTimestamp = 0; state.analysisIntervalMs = 88;
     syncCanvasResolution(); state.animationHandle = requestAnimationFrame(tick);
   } catch (error) {
-    console.error('Camera startup failed', error); stopCamera(); state.mode = 'idle';
+    console.error('Camera startup failed', error); stopSource(); state.mode = 'idle';
+    elements.intro.hidden = false; elements.activeSource.hidden = true; elements.colorDock.hidden = true;
     const denied = error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError';
     notify(denied ? 'Allow camera access in browser settings.' : 'Camera unavailable. Check permissions and connection.', 6000);
   } finally {
     state.busy = false; elements.start.disabled = false;
-    elements.start.textContent = 'Start camera';
+    elements.importStart.disabled = false;
+    elements.importActive.disabled = false;
+    elements.start.querySelector('span').textContent = 'Start camera';
+  }
+}
+function isVideoFile(file) {
+  return Boolean(file && (file.type.startsWith('video/') || /\.(mp4|m4v|mov|webm|ogv)$/i.test(file.name)));
+}
+async function loadImportedVideo(file) {
+  elements.fileInput.value = ''; // Allow re-selecting the same file later.
+  if (!file || state.busy) return;
+  if (!isVideoFile(file)) { notify('Choose a video file (MP4, MOV or WebM).'); return; }
+
+  state.busy = true;
+  elements.start.disabled = true;
+  elements.importStart.disabled = true;
+  elements.importActive.disabled = true;
+  stopSource();
+  state.mode = 'idle';
+  clearMask();
+  elements.activeSource.hidden = true;
+  elements.colorDock.hidden = true;
+  elements.intro.hidden = false;
+  elements.importStart.querySelector('span').textContent = 'Loading video…';
+  drawFrame();
+
+  try {
+    // File stays on this device. No uploads; the browser decodes it locally.
+    state.importedVideoUrl = URL.createObjectURL(file);
+    elements.video.loop = true;
+    elements.video.muted = true;
+    elements.video.playsInline = true;
+    elements.video.preload = 'auto';
+    elements.video.src = state.importedVideoUrl;
+    elements.video.load();
+
+    // Start muted playback directly after file selection; load inference in parallel.
+    await Promise.all([elements.video.play(), loadModel()]);
+    state.mediaWidth = elements.video.videoWidth;
+    state.mediaHeight = elements.video.videoHeight;
+    if (!state.mediaWidth || !state.mediaHeight) throw new Error('No decoded video dimensions');
+
+    // Start the preview at the beginning, even if loading the model took time.
+    elements.video.currentTime = 0;
+    state.mode = 'video';
+    elements.intro.hidden = true;
+    elements.activeSource.hidden = false;
+    elements.sourceLabel.textContent = 'VIDEO LOOP';
+    elements.liveIndicator.hidden = false;
+    elements.colorDock.hidden = false;
+    elements.cameraHint.hidden = true;
+    state.lastInferAt = 0;
+    state.lastRenderAt = 0;
+    state.lastVideoTime = -1;
+    state.lastTimestamp = 0;
+    state.analysisIntervalMs = 88;
+    syncCanvasResolution();
+    state.animationHandle = requestAnimationFrame(tick);
+  } catch (error) {
+    console.error('Could not import video:', error);
+    stopSource();
+    state.mode = 'idle';
+    clearMask();
+    elements.intro.hidden = false;
+    elements.activeSource.hidden = true;
+    elements.colorDock.hidden = true;
+    drawFrame();
+    notify('Could not play this file. Try an H.264 MP4 or another browser.', 6500);
+  } finally {
+    state.busy = false;
+    elements.start.disabled = false;
+    elements.importStart.disabled = false;
+    elements.importActive.disabled = false;
+    elements.importStart.querySelector('span').textContent = 'Import video';
   }
 }
 function hsvToHex(h,s,v) {
@@ -358,6 +468,12 @@ function sampleSV(event) {
 }
 function bindUI() {
   elements.start.addEventListener('click',startCamera);
+  const chooseVideo = () => { if (!state.busy) elements.fileInput.click(); };
+  elements.importStart.addEventListener('click',chooseVideo);
+  elements.importActive.addEventListener('click',chooseVideo);
+  elements.fileInput.addEventListener('change',event => {
+    void loadImportedVideo(event.target.files?.[0]);
+  });
   elements.colorTrigger.addEventListener('click',()=>togglePicker());
   elements.hueSlider.addEventListener('input',e=>{picker.h=Number(e.target.value);updatePickerUI();});
   elements.svField.addEventListener('pointerdown',e=>{
@@ -385,15 +501,18 @@ function bindUI() {
   document.addEventListener('keydown',async e=>{
     if(e.key==='Escape'){togglePicker(false);return;}
     if(e.target instanceof HTMLInputElement)return;
-    if(e.key.toLowerCase()==='c'&&state.mode==='camera')togglePicker();
-    if(e.key.toLowerCase()==='f'&&state.mode==='camera') {
+    if(e.key.toLowerCase()==='c'&&state.mode!=='idle')togglePicker();
+    if(e.key.toLowerCase()==='f'&&state.mode!=='idle') {
       try { if(document.fullscreenElement)await document.exitFullscreen();
         else await document.documentElement.requestFullscreen();
       } catch(err){console.warn('Fullscreen unavailable',err);}
     }
   });
   window.addEventListener('resize',syncCanvasResolution);
-  window.addEventListener('pagehide',stopCamera);
+  window.addEventListener('pagehide',stopSource);
+  elements.video.addEventListener('seeked', () => {
+    if (state.mode === 'video') { clearMask(); state.lastVideoTime = -1; state.lastInferAt = 0; }
+  });
   document.addEventListener('visibilitychange',()=>{
     if(!document.hidden)state.lastInferAt=0;
   });
