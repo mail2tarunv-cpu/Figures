@@ -154,3 +154,42 @@ button:focus-visible, input:focus-visible, .sv-field:focus-visible { outline: 2p
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+
+/* File video is a second local input source, not a recording/editing mode. */
+.start-actions {
+  display: flex; align-items: center; justify-content: center;
+  gap: 14px; flex-wrap: wrap; margin-top: 42px;
+}
+.start-actions .start-button { margin: 0; }
+.import-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 11px;
+  height: 58px; min-width: 174px; padding: 0 23px;
+  border: 1px solid #444; border-radius: 34px;
+  background: #222; color: #e8e8e8;
+  font-size: 14px; font-weight: 600;
+  transition: border-color .2s ease, background .2s ease, transform .2s ease;
+}
+.import-button:hover:not(:disabled) { border-color: #878787; background: #303030; }
+.import-button:active:not(:disabled) { transform: scale(.97); }
+.import-button:disabled { opacity: .5; cursor: wait; }
+.topbar-source {
+  display: flex; align-items: center; gap: 19px;
+  pointer-events: auto;
+}
+.import-inline {
+  padding: 9px 12px; border: 1px solid #343434; border-radius: 99px;
+  color: #dadada; background: rgba(35,35,35,.85);
+  font-size: 11px; font-weight: 560; letter-spacing: .015em;
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+}
+.import-inline:hover:not(:disabled) { background: #343434; border-color: #5a5a5a; }
+.import-inline:disabled { opacity: .5; cursor: wait; }
+@media (max-width:600px) {
+  .start-actions { margin-top: 32px; flex-direction: column; gap: 11px; }
+  .start-actions .start-button, .start-actions .import-button {
+    height: 52px; min-width: 194px; justify-content: center;
+  }
+  .topbar-source { gap: 10px; }
+  .import-inline { padding: 9px 10px; font-size: 10px; }
+}
